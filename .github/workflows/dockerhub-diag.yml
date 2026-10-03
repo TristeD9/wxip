@@ -39,6 +39,17 @@ jobs:
             "https://auth.docker.io/token?service=registry.docker.io"
           probe "with credentials, lowercase scope" -u "$USERNAME:$TOKEN" \
             "https://auth.docker.io/token?service=registry.docker.io&scope=repository:tristed9/wxip:pull"
+          probe "control: obviously bogus token" -u "$USERNAME:not-a-real-token" \
+            "https://auth.docker.io/token?service=registry.docker.io"
+          probe "control: bogus user and token" -u "definitely-not-a-user:not-a-real-token" \
+            "https://auth.docker.io/token?service=registry.docker.io"
+
+          echo "== hub.docker.com login api =="
+          curl -sS -o /dev/null --max-time 30 \
+            -w "hub login http_code=%{http_code}\n" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$USERNAME\",\"password\":\"$TOKEN\"}" \
+            https://hub.docker.com/v2/users/login || true
 
       - name: Can the daemon pull without our credentials
         run: |
