@@ -1,25 +1,15 @@
 name: Build and push image
 
-# 触发条件：
-#   1) 推送到 main（只改文档不会触发，避免无谓重建）
-#   2) 推 v* 标签（例如 v0.2.0，会额外打出版本号标签）
-#   3) 在 Actions 页面手动触发
+# 只在手动触发时运行，推代码不会自动构建推送。
+# 触发方式：
+#   1) GitHub 仓库 Actions 页面 → 左侧「Build and push image」→ Run workflow
+#   2) 命令行：gh workflow run "Build and push image" --repo TristeD9/wxip --ref main
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
-      - ".gitignore"
-      - ".dockerignore"
   workflow_dispatch:
 
-# 同一分支连续推送时取消上一次未完成的构建，避免并发推送互相覆盖
+# 连续手动触发时取消上一次未完成的构建，避免并发推送互相覆盖
 concurrency:
-  group: docker-publish-${{ github.ref }}
+  group: docker-publish
   cancel-in-progress: true
 
 jobs:
@@ -73,9 +63,8 @@ jobs:
         with:
           images: ${{ steps.hub.outputs.username }}/wxip
           tags: |
-            # main 分支推 latest；打 v* 标签时同时推版本号；每次附带短 commit 标签便于回滚
+            # 每次手动触发都推 latest（默认分支）和 sha-<短 commit>，后者便于回滚到具体版本
             type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
             type=sha,format=short
 
       - name: Build and push
