@@ -67,60 +67,24 @@ docker compose version
 
 ### 3.2 一条命令块（推荐）
 
-在目标机器上整段粘贴执行，会自动生成 compose 与 `.env`、随机生成会话密钥并启动：
-
-````bash
-set -euo pipefail
-
-APP_DIR=/opt/wecom-trusted-ip
-mkdir -p "$APP_DIR/data"
-cd "$APP_DIR"
-
-if command -v openssl >/dev/null 2>&1; then
-  SECRET=$(openssl rand -hex 32)
-else
-  SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
-fi
-
-cat > compose.yaml <<'YAML'
-name: wecom-trusted-ip
-
 services:
   trusted-ip:
-    image: "${IMAGE:-YOUR_DOCKERHUB/wxip:latest}"
+    image: tristed9/wxip:latest
     container_name: wecom-trusted-ip
     restart: unless-stopped
     ports:
-      - "${PANEL_BIND:-0.0.0.0}:8000:8000"
+      - "8000:8000"
     environment:
-      APP_SECRET_KEY: "${APP_SECRET_KEY:?请先在 .env 里设置 APP_SECRET_KEY}"
-      APP_DATA_DIR: "/data"
-      APP_AUTO_SYNC_ENABLED: "${APP_AUTO_SYNC_ENABLED:-true}"
-      APP_SYNC_INTERVAL_SECONDS: "${APP_SYNC_INTERVAL_SECONDS:-300}"
-      APP_BROWSER_HEADLESS: "${APP_BROWSER_HEADLESS:-true}"
+      APP_SECRET_KEY: "你的自定义"
+      APP_DATA_DIR: "/data"  #默认即可
+      APP_AUTO_SYNC_ENABLED: "true"
+      APP_SYNC_INTERVAL_SECONDS: "300"
+      APP_BROWSER_HEADLESS: "true"
       APP_BROWSER_CHANNEL: ""
-      TZ: "${TZ:-Asia/Shanghai}"
+      TZ: "Asia/Shanghai"
     volumes:
-      - "${DATA_DIR:-./data}:/data"
+      - "宿主机路径:/data"
     shm_size: "512m"
-YAML
-
-cat > .env <<EOF
-APP_SECRET_KEY=$SECRET
-IMAGE=${IMAGE:-YOUR_DOCKERHUB/wxip:latest}   # ← 改成你自己的镜像地址
-PANEL_BIND=0.0.0.0
-DATA_DIR=$APP_DIR/data
-TZ=Asia/Shanghai
-APP_SYNC_INTERVAL_SECONDS=300
-APP_AUTO_SYNC_ENABLED=true
-EOF
-
-docker compose config | grep -A2 "type: bind"   # 确认数据目录解析正确
-docker compose up -d
-docker compose ps
-````
-
-启动后浏览器访问 `http://<机器IP>:8000`。
 
 ### 3.3 或者用现成文件
 
