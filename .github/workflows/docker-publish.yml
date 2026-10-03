@@ -1,11 +1,26 @@
 name: Build and push image
 
-# 推一个 v* 标签，或在 Actions 页面手动触发
+# 触发条件：
+#   1) 推送到 main（只改文档不会触发，避免无谓重建）
+#   2) 推 v* 标签（例如 v0.2.0，会额外打出版本号标签）
+#   3) 在 Actions 页面手动触发
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".gitignore"
+      - ".dockerignore"
   workflow_dispatch:
+
+# 同一分支连续推送时取消上一次未完成的构建，避免并发推送互相覆盖
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -13,6 +28,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 镜像解压后接近 4 GB，runner 默认磁盘偏紧，先清掉用不到的大目录
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h /
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -27,11 +48,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # 仓库名可改成自己的；用户名走 DOCKERHUB_USERNAME 这个 Secret
           images: ${{ secrets.DOCKERHUB_USERNAME }}/wxip
           tags: |
+            # main 分支推 latest；打 v* 标签时同时推版本号；每次附带短 commit 标签便于回滚
+            type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
-            type=raw,value=latest
+            type=sha,format=short
 
       - name: Build and push
         uses: docker/build-push-action@v6
