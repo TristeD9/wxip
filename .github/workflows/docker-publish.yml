@@ -38,7 +38,7 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 直接用 docker login，避免 action 版本的额外变量；顺便打印长度便于排查密钥是否配错
+      # 直接用 docker login，避免 action 版本带来的额外变量，失败信息也更直观
       - name: Log in to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
