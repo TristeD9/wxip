@@ -1,0 +1,47 @@
+# 企业微信可信 IP 自动维护服务 —— 部署用 compose
+#
+# 说明：这个版本刻意不使用多行的 healthcheck / logging 嵌套块，
+#   1) 健康检查由镜像自带的 HEALTHCHECK 提供，docker compose ps 依然显示 healthy；
+#   2) 需要限制日志大小时，取消文件末尾那三行注释即可。
+# 这样即使经过聊天窗口或某些面板编辑器复制粘贴，也不容易因为缩进丢失而解析失败。
+#
+# 用法：
+#   cp .env.example .env        # 必须填 APP_SECRET_KEY
+#   docker compose config       # 先校验，能打印出完整配置说明语法没问题
+#   docker compose up -d
+#
+# 首次启动后浏览器访问 http://<主机IP>:8000 创建管理员账号。
+
+name: wecom-trusted-ip
+
+services:
+  trusted-ip:
+    # 改成你自己的镜像地址，或在 .env 里设置 IMAGE
+    image: "${IMAGE:-YOUR_DOCKERHUB/wxip:latest}"
+    container_name: wecom-trusted-ip
+    restart: unless-stopped
+
+    ports:
+      # 走 Nginx/宝塔反代时改成 PANEL_BIND=127.0.0.1；直接访问保持 0.0.0.0 并放行防火墙
+      - "${PANEL_BIND:-0.0.0.0}:8000:8000"
+
+    environment:
+      APP_SECRET_KEY: "${APP_SECRET_KEY:?请先在 .env 里设置 APP_SECRET_KEY}"
+      APP_DATA_DIR: "/data"
+      APP_AUTO_SYNC_ENABLED: "${APP_AUTO_SYNC_ENABLED:-true}"
+      APP_SYNC_INTERVAL_SECONDS: "${APP_SYNC_INTERVAL_SECONDS:-300}"
+      APP_BROWSER_HEADLESS: "${APP_BROWSER_HEADLESS:-true}"
+      # 容器里使用镜像自带的 Chromium，必须留空
+      APP_BROWSER_CHANNEL: ""
+      TZ: "${TZ:-Asia/Shanghai}"
+
+    volumes:
+      - "${DATA_DIR:-./data}:/data"
+
+    # Chromium 需要共享内存；镜像内已加 --disable-dev-shm-usage，这里再兜一层
+    shm_size: "512m"
+
+    # 需要限制容器日志占用时，取消下面三行的注释（缩进保持与 image 同级）
+    # logging:
+    #   driver: "json-file"
+    #   options: { max-size: "10m", max-file: "3" }

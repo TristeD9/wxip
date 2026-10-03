@@ -1,0 +1,35 @@
+# 群晖 Container Manager / 宝塔等面板「粘贴 compose」专用版
+#
+# 与 compose.yaml 的区别：不用任何 ${变量}，所有值直接写死，
+# 粘到面板编辑器里不会再因为变量插值或缩进问题报
+# 'expected a map or struct, got "string"' 之类的错误。
+#
+# 使用前只改两处：
+#   1) APP_SECRET_KEY 换成随机字符串（openssl rand -hex 32）
+#   2) volumes 第一项改成你的真实宿主机路径
+#      群晖示例：/volume1/docker/wecom-trusted-ip/data
+#      普通 Linux：/opt/wecom-trusted-ip/data
+#
+# 首次启动后浏览器访问 http://<机器IP>:8000 创建管理员账号。
+
+name: wecom-trusted-ip
+
+services:
+  trusted-ip:
+    # 改成你自己的镜像地址（这个文件刻意不用变量，方便面板直接粘贴）
+    image: "YOUR_DOCKERHUB/wxip:latest"
+    container_name: wecom-trusted-ip
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_SECRET_KEY: "把这里换成随机字符串"
+      APP_DATA_DIR: "/data"
+      APP_AUTO_SYNC_ENABLED: "true"
+      APP_SYNC_INTERVAL_SECONDS: "300"
+      APP_BROWSER_HEADLESS: "true"
+      APP_BROWSER_CHANNEL: ""
+      TZ: "Asia/Shanghai"
+    volumes:
+      - "/volume1/docker/wecom-trusted-ip/data:/data"
+    shm_size: "512m"

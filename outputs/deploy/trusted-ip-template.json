@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "url": "https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN&f=json&ajax=1&timeZoneInfo%5Bzone_offset%5D=-8",
+  "headers": {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "content-type": "application/x-www-form-urlencoded",
+    "origin": "https://work.weixin.qq.com",
+    "referer": "https://work.weixin.qq.com/wework_admin/frame",
+    "x-requested-with": "XMLHttpRequest"
+  },
+  "body": "app_id={app_id}&ipList%5B%5D={ip}"
+}

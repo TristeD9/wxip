@@ -1,0 +1,69 @@
+# 企业微信可信 IP 自动维护服务
+#
+# 常用命令：
+#   docker compose up -d            拉取已发布镜像并启动
+#   docker compose logs -f          查看日志
+#   docker compose pull && docker compose up -d    升级到最新镜像
+#   docker compose down             停止并删除容器（数据保留在 ./data）
+#
+# 首次启动后浏览器访问 http://<主机IP>:8000 创建管理员账号。
+#
+# 变量可在同目录的 .env 里设置（Compose 会自动读取），例如：
+#   APP_SECRET_KEY=$(openssl rand -hex 32)
+#   PANEL_BIND=127.0.0.1
+
+# 固定项目名，避免因目录名不同产生 wecom-trusted-ip-build、data 之类的随机命名
+name: wecom-trusted-ip
+
+services:
+  trusted-ip:
+    # 改成你自己的镜像地址（可以先 push 到 Docker Hub，再在这里或 .env 里填 IMAGE）
+    image: "${IMAGE:-YOUR_DOCKERHUB/wxip:latest}"
+    container_name: wecom-trusted-ip
+    restart: unless-stopped
+
+    # 需要本地构建镜像时，注释掉上面的 image，改用下面三行
+    # build:
+    #   context: .
+    #   args:
+    #     PLAYWRIGHT_VERSION: "1.63.0"
+
+    ports:
+      # 默认监听所有网卡；对公网开放时建议改成 PANEL_BIND=127.0.0.1，再用 Nginx/宝塔反代并配 HTTPS
+      - "${PANEL_BIND:-0.0.0.0}:8000:8000"
+
+    environment:
+      # 必填：面板会话签名密钥，部署前务必换成随机字符串
+      APP_SECRET_KEY: "${APP_SECRET_KEY:-change-me-before-deploy}"
+      APP_DATA_DIR: "/data"
+      APP_AUTO_SYNC_ENABLED: "${APP_AUTO_SYNC_ENABLED:-true}"
+      APP_SYNC_INTERVAL_SECONDS: "${APP_SYNC_INTERVAL_SECONDS:-300}"
+      APP_BROWSER_HEADLESS: "${APP_BROWSER_HEADLESS:-true}"
+      # 容器里用的是镜像自带的 Chromium，这里固定留空；
+      # 注意不要复用 .env 里的 APP_BROWSER_CHANNEL（那是本机调试用的 chrome/msedge）
+      APP_BROWSER_CHANNEL: ""
+      TZ: "${TZ:-Asia/Shanghai}"
+
+    volumes:
+      # 数据库、企业微信登录态、自动发现调试文件都在这里，务必持久化
+      - "${DATA_DIR:-./data}:/data"
+
+    # Chromium 需要共享内存；镜像内已加 --disable-dev-shm-usage，这里再兜一层
+    shm_size: "512m"
+
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health').read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
