@@ -90,7 +90,7 @@ services:
     volumes:
       - "/opt/wecom-trusted-ip/data:/data"      # 冒号左边是宿主机路径，改成你自己的
     shm_size: "512m"
-``
+```
 
 启动后浏览器访问 `http://<机器IP>:8000`；端口冲突时改 compose 里的宿主机端口（例如 `8943:8000`），访问地址随之变化。
 
