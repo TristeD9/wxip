@@ -65,26 +65,43 @@ docker compose version
 
 > 部署机器必须与 iKuai 在同一网络（或已通过 VPN 打通），否则读不到公网 IP。
 
-### 3.2 一条命令块（推荐）
+### 3.2 直接使用（推荐）
+
+把下面这份 `compose.yaml` 存到目标机器，例如 `/opt/wecom-trusted-ip/compose.yaml`：
+
+```yaml
+name: wecom-trusted-ip
 
 services:
   trusted-ip:
-    image: tristed9/wxip:latest
+    image: tristed9/wxip:latest                 # 换成你自己的镜像地址
     container_name: wecom-trusted-ip
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8000:8000"                             # 宿主机端口冲突时改左边，例如 "8943:8000"
     environment:
-      APP_SECRET_KEY: "你的自定义"
-      APP_DATA_DIR: "/data"  #默认即可
+      APP_SECRET_KEY: "你的自定义"                # 必改：随机字符串，例如 openssl rand -hex 32
+      APP_DATA_DIR: "/data"                     # 容器内路径，默认即可
       APP_AUTO_SYNC_ENABLED: "true"
       APP_SYNC_INTERVAL_SECONDS: "300"
       APP_BROWSER_HEADLESS: "true"
       APP_BROWSER_CHANNEL: ""
       TZ: "Asia/Shanghai"
     volumes:
-      - "宿主机路径:/data"
+      - "/opt/wecom-trusted-ip/data:/data"      # 冒号左边是宿主机路径，改成你自己的
     shm_size: "512m"
+```
+
+然后启动：
+
+```bash
+mkdir -p /opt/wecom-trusted-ip/data
+cd /opt/wecom-trusted-ip
+docker compose up -d
+docker compose ps
+```
+
+启动后浏览器访问 `http://<机器IP>:8000`；端口冲突时改 compose 里的宿主机端口（例如 `8943:8000`），访问地址随之变化。
 
 ### 3.3 或者用现成文件
 
