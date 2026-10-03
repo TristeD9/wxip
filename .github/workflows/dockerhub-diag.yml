@@ -23,6 +23,8 @@ jobs:
           USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
           TOKEN="$(printf '%s' "$DOCKERHUB_TOKEN" | tr -d '[:space:]')"
           echo "username length: ${#USERNAME}  token length: ${#TOKEN}"
+          echo "token sha256 prefix: $(printf '%s' "$TOKEN" | sha256sum | cut -c1-16)"
+          echo "username sha256 prefix: $(printf '%s' "$USERNAME" | sha256sum | cut -c1-16)"
           echo "token has $(printf '%s' "$TOKEN" | tr -d 'A-Za-z0-9_-' | wc -c) chars outside [A-Za-z0-9_-]"
           echo "username has $(printf '%s' "$USERNAME" | tr -d 'A-Za-z0-9_-' | wc -c) chars outside [A-Za-z0-9_-]"
 
