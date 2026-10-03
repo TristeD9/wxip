@@ -15,7 +15,6 @@ on:
       - "**/*.md"
       - ".gitignore"
       - ".dockerignore"
-      - ".github/workflows/dockerhub-diag.yml"
   workflow_dispatch:
 
 # 同一分支连续推送时取消上一次未完成的构建，避免并发推送互相覆盖
@@ -45,11 +44,13 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          # 去掉可能混进来的回车/换行/空格（这类字符会让 registry 报 malformed HTTP Authorization header）
+          # 去掉可能混进来的回车/空白字符，避免 registry 报 malformed HTTP Authorization header
           USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
           TOKEN="$(printf '%s' "$DOCKERHUB_TOKEN" | tr -d '[:space:]')"
-          echo "username length: ${#USERNAME}"
-          echo "token length: ${#TOKEN}"
+          if [ -z "$USERNAME" ] || [ -z "$TOKEN" ]; then
+            echo "::error::缺少仓库密钥 DOCKERHUB_USERNAME 或 DOCKERHUB_TOKEN，请在 Settings > Secrets and variables > Actions 中配置。"
+            exit 1
+          fi
           echo "$TOKEN" | docker login -u "$USERNAME" --password-stdin
 
       - name: Collect tags and labels
