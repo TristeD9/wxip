@@ -1,0 +1,48 @@
+name: Docker Hub diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Registry endpoint probe
+        run: |
+          echo "== GET https://registry-1.docker.io/v2/ =="
+          curl -sS -D - -o /dev/null --max-time 30 https://registry-1.docker.io/v2/ || true
+          echo
+          echo "== DNS =="
+          getent hosts registry-1.docker.io auth.docker.io || true
+
+      - name: Token exchange probe
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          TOKEN="$(printf '%s' "$DOCKERHUB_TOKEN" | tr -d '[:space:]')"
+          curl -sS -o /dev/null --max-time 30 -w "auth http_code=%{http_code}\n" \
+            -u "$USERNAME:$TOKEN" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${USERNAME}/wxip:pull" || true
+
+      - name: Daemon and proxy info
+        run: |
+          docker version || true
+          echo "== proxy env =="
+          env | grep -iE 'proxy' || echo "no proxy env"
+          echo "== daemon.json =="
+          sudo cat /etc/docker/daemon.json 2>/dev/null || echo "no daemon.json"
+          echo "== docker config =="
+          cat ~/.docker/config.json 2>/dev/null || echo "no config.json"
+
+      - name: Debug login
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          TOKEN="$(printf '%s' "$DOCKERHUB_TOKEN" | tr -d '[:space:]')"
+          echo "$TOKEN" | docker --debug login -u "$USERNAME" --password-stdin 2>&1 \
+            | sed -E 's/(Basic|Bearer)[[:space:]]+[A-Za-z0-9+\/=._-]+/\1 <redacted>/g' \
+            | tail -n 40 || true
