@@ -15,6 +15,7 @@ on:
       - "**/*.md"
       - ".gitignore"
       - ".dockerignore"
+      - ".github/workflows/dockerhub-diag.yml"
   workflow_dispatch:
 
 # 同一分支连续推送时取消上一次未完成的构建，避免并发推送互相覆盖

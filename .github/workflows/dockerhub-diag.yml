@@ -22,9 +22,27 @@ jobs:
         run: |
           USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
           TOKEN="$(printf '%s' "$DOCKERHUB_TOKEN" | tr -d '[:space:]')"
-          curl -sS -o /dev/null --max-time 30 -w "auth http_code=%{http_code}\n" \
-            -u "$USERNAME:$TOKEN" \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${USERNAME}/wxip:pull" || true
+          echo "username length: ${#USERNAME}  token length: ${#TOKEN}"
+          echo "token has $(printf '%s' "$TOKEN" | tr -d 'A-Za-z0-9_-' | wc -c) chars outside [A-Za-z0-9_-]"
+          echo "username has $(printf '%s' "$USERNAME" | tr -d 'A-Za-z0-9_-' | wc -c) chars outside [A-Za-z0-9_-]"
+
+          probe () {
+            label="$1"; shift
+            echo "== $label =="
+            curl -sS -o /dev/null -D - --max-time 30 "$@" 2>&1 \
+              | grep -iE '^(HTTP/|www-authenticate)' || true
+          }
+
+          probe "no credentials" \
+            "https://auth.docker.io/token?service=registry.docker.io"
+          probe "with credentials" -u "$USERNAME:$TOKEN" \
+            "https://auth.docker.io/token?service=registry.docker.io"
+          probe "with credentials, lowercase scope" -u "$USERNAME:$TOKEN" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:tristed9/wxip:pull"
+
+      - name: Can the daemon pull without our credentials
+        run: |
+          docker pull hello-world:latest || true
 
       - name: Daemon and proxy info
         run: |
