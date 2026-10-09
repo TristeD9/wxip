@@ -17,7 +17,7 @@ from playwright.async_api import async_playwright
 
 from app.models import RequestTemplate, WeComApp, WeComLoginState
 from app.wecom.curl_template import filter_replay_headers
-from app.wecom.parsing import extract_self_built_apps
+from app.wecom.parsing import describe_wecom_error, extract_self_built_apps
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class WeComAdminSession:
     async def ensure_logged_in(self) -> None:
         """确认管理后台登录态仍有效，失效时抛出可读异常。"""
         async with self._operation_lock:
-            await self._ensure_logged_in_locked()
+            await self._ensure_logged_in_locked(verify_session=True)
 
     async def discover_apps(self) -> list[WeComApp]:
         """打开应用管理页，从后台自身的 XHR 响应中提取自建应用清单。"""
@@ -200,11 +200,19 @@ class WeComAdminSession:
                 raise WeComAdminError(
                     f"企业微信返回 HTTP {response.status}：{text[:200]}"
                 )
+            # 后台拒绝写入时同样是 200，只把原因写在响应体里，必须解析出来
+            error_detail = describe_wecom_error(text)
+            if error_detail is not None:
+                raise WeComAdminError(f"企业微信拒绝了本次可信 IP 写入：{error_detail}")
             return text
 
-    async def _ensure_logged_in_locked(self) -> None:
-        """在已持有操作锁的情况下确认登录态，必要时用已保存的登录态恢复。"""
-        if self._login_state.status == "logged_in":
+    async def _ensure_logged_in_locked(self, *, verify_session: bool = False) -> None:
+        """在已持有操作锁的情况下确认登录态，必要时用已保存的登录态恢复。
+
+        ``verify_session`` 为真时，即使进程内状态已是「已登录」也重新访问一次后台，
+        否则企业微信侧会话过期后，内存里的陈旧状态会一直骗过后面的请求。
+        """
+        if self._login_state.status == "logged_in" and not verify_session:
             return
         await self._ensure_browser()
         context = self._require_context()
@@ -216,8 +224,11 @@ class WeComAdminSession:
             await page.goto(
                 self._apps_url_provider(), wait_until="domcontentloaded", timeout=self._timeout_ms
             )
+            # 登录态失效时后台会跳回登录页，等网络安静下来再判断，避免误判成已登录
+            await _wait_for_network_idle(page)
             if not self._is_admin_frame(page.url):
-                raise WeComAdminError("尚未登录企业微信管理后台，请先扫码登录")
+                self._set_state("failed", message="企业微信登录态已失效，请重新扫码")
+                raise WeComAdminError("企业微信登录态已失效，请重新扫码登录")
             await self._mark_logged_in()
         finally:
             if created_page:

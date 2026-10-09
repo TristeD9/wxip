@@ -28,10 +28,17 @@ class FakeResolver:
 
 
 class FakeWeComSession:
-    def __init__(self, *, failing_agent_ids: set[str] | None = None, logged_in: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        failing_agent_ids: set[str] | None = None,
+        logged_in: bool = True,
+        failure_message: str = "企业微信返回 HTTP 500",
+    ) -> None:
         self.calls: list[tuple[str, str, str]] = []
         self.failing_agent_ids = failing_agent_ids or set()
         self.logged_in = logged_in
+        self.failure_message = failure_message
 
     async def ensure_logged_in(self) -> None:
         if not self.logged_in:
@@ -42,7 +49,7 @@ class FakeWeComSession:
     ) -> str:
         self.calls.append((agent_id, app_id, ip))
         if agent_id in self.failing_agent_ids:
-            raise WeComAdminError("企业微信返回 HTTP 500")
+            raise WeComAdminError(self.failure_message)
         return '{"errcode":0}'
 
 
@@ -154,6 +161,28 @@ async def test_sync_records_partial_failure(storage):
     assert [result.success for result in summary.results] == [True, False]
     failed_app = next(app for app in storage.list_wecom_apps() if app.agent_id == "1230002")
     assert failed_app.last_error == "企业微信返回 HTTP 500"
+
+
+async def test_sync_marks_app_failed_when_wecom_rejects_request(storage):
+    """企业微信用 HTTP 200 + errcode 拒绝时，不能记成同步成功。"""
+    prepare_storage(storage)
+    service = SyncService(
+        storage=storage,
+        resolver=FakeResolver(ip="9.9.9.9"),
+        wecom_session=FakeWeComSession(
+            failing_agent_ids={"1230002"},
+            failure_message="企业微信拒绝了本次可信 IP 写入：errcode=301002 msg=invalid url_token",
+        ),
+    )
+
+    summary = await service.sync()
+
+    assert summary.status == "failed"
+    assert summary.results[0].success is False
+    assert "errcode=301002" in summary.results[0].message
+    stored_app = storage.list_wecom_apps()[0]
+    assert stored_app.last_synced_ip is None
+    assert "errcode=301002" in stored_app.last_error
 
 
 async def test_sync_fails_when_not_logged_in(storage):

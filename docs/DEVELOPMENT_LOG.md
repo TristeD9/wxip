@@ -200,11 +200,43 @@ docker exec -it <容器名> python -m app.cli reset-admin
    示例值（例如 `agentid` 用 `123000x`，后台编号用 `562950000000000x`，
    公网 IP 用可公网路由的示例地址），保证测试仍然通过。
 
+## 十二、修复同步"假成功"
+
+用户反馈（2026-10-10）：面板显示"已覆盖 N/N 个应用的可信 IP"，但企业微信里
+各应用的可信 IP 并没有变。
+
+排查结论 —— 失败被静默吞掉了：
+
+- `backend/app/wecom/admin_browser.py` 的 `replay_request()` 只用
+  `response.status >= 400` 判断成败。而企业微信管理后台在会话失效、参数被拒时
+  **依然返回 HTTP 200**，真正的原因放在响应体的 `errcode` / `errmsg` 里。
+  于是"请求发出去了"就等于"同步成功"，面板与日志都不报错。
+- 同文件 `_ensure_logged_in_locked()` 在进程内状态为 `logged_in` 时直接 return，
+  不再向企业微信确认。容器长期运行时企业微信侧会话过期，内存里的陈旧状态会继续
+  骗过后续请求，所以症状表现为"一开始能用，跑一段时间后就不生效了"。
+
+处理：
+
+1. `backend/app/wecom/parsing.py` 新增 `describe_wecom_error(body)`：解析 JSON 响应，
+   `errcode` 非 0 时返回 `errcode=.. msg=..`；成功、非 JSON、无 `errcode` 字段返回 `None`；
+2. `replay_request()` 在 HTTP 状态校验之后调用它，被拒绝时抛 `WeComAdminError`，
+   企业微信的原始错误码与说明会落到该应用的「最近错误」和同步日志；
+3. `ensure_logged_in()` 改为强制访问一次后台核对登录态（`verify_session=True`），
+   跳回登录页时把状态置为 `failed` 并提示重新扫码；
+4. 补回归测试：`tests/test_wecom_parsing.py` 新增 8 条、新建
+   `tests/test_wecom_replay_request.py` 5 条、`tests/test_sync_service.py` 增加
+   "被 errcode 拒绝时不得记为成功" 用例 1 条。
+
+本次未解决：企业微信**具体**拒绝原因（会话过期 / app_id 不匹配 / 页面改版）要看真实
+返回。修复后「最近错误」会直接显示 `errcode=.. msg=..`，拿到真实错误码再按需处理。
+
 ## Resume 入口
 
 ### 当前状态快照
 
-- 代码、测试、镜像、部署件均已就绪；单元测试 **127 passed**；
+- 代码、测试、镜像、部署件均已就绪；单元测试 **141 passed**；
+- 同步成败判定已修正为解析企业微信响应体的 `errcode`（见十二），面板不会再把
+  "被后台拒绝"显示成同步成功；
 - 镜像已构建并推送（仓库里统一用 `YOUR_DOCKERHUB/wxip:latest` 占位，使用者替换成自己的地址）；
   压缩约 1.0 GB、解压 3.73 GB，自带 Chromium；
 - 真实环境全链路验证通过：扫码登录 → 读取 iKuai 公网 IP → 覆盖全部自建应用的可信 IP
@@ -213,15 +245,19 @@ docker exec -it <容器名> python -m app.cli reset-admin
 
 ### 下次进来先做的事（按优先级）
 
-1. 若要继续改进体积：可基于 `python:3.12-slim` + 只装 Chromium 做一版瘦身镜像
+1. 若面板报 `errcode` 相关错误：会话类错误先重新扫码；`app_id` 类错误去「企业微信」
+   页核对该应用的「控制台应用编号」；
+2. 若要继续改进体积：可基于 `python:3.12-slim` + 只装 Chromium 做一版瘦身镜像
    （去掉用不到的 Firefox/WebKit），预计下载降到约 500 MB；
-2. 企业微信后台若改版：先看 `data/wecom_discover_debug.json` 里的 `app_entry_samples`，
+3. 企业微信后台若改版：先看 `data/wecom_discover_debug.json` 里的 `app_entry_samples`，
    再调整 `backend/app/wecom/parsing.py` 的判别规则；
-3. iKuai 若换固件：用面板「iKuai → 探测原始响应」，按返回结构调整
+4. iKuai 若换固件：用面板「iKuai → 探测原始响应」，按返回结构调整
    `backend/app/ikuai/parser.py` 的字段候选。
 
 ### 绝对不要做的事
 
 - 不要把 `data/`、`.env`、`work/`（含 SSH 私钥）提交到版本库；
 - 不要为了让同步通过而放宽模板对 `{ip}` 的校验，那会导致静默写不进最新 IP；
+- 不要只看 HTTP 状态码判断企业微信接口是否成功——后台被拒时同样是 200，必须看
+  `errcode`；
 - 不要在未确认后台请求特征的情况下，把"覆盖为仅最新 IP"改成追加策略。

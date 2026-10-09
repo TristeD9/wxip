@@ -4,6 +4,7 @@ import pytest
 
 from app.models import WeComApp
 from app.wecom.parsing import (
+    describe_wecom_error,
     extract_self_built_apps,
     merge_app_states,
     parse_manual_app_list,
@@ -187,3 +188,31 @@ def test_parse_manual_app_list_keeps_spaces_in_app_name():
 
     assert apps[0].name == "客服 系统"
     assert apps[0].console_app_id is None
+
+
+@pytest.mark.parametrize("body", ['{"errcode":0,"errmsg":"ok"}', '{"errcode":"0","errmsg":"ok"}'])
+def test_describe_wecom_error_returns_none_for_success(body):
+    assert describe_wecom_error(body) is None
+
+
+def test_describe_wecom_error_reports_errcode_and_message():
+    body = '{"errcode":301002,"errmsg":"invalid url_token"}'
+
+    assert describe_wecom_error(body) == "errcode=301002 msg=invalid url_token"
+
+
+def test_describe_wecom_error_handles_missing_errmsg():
+    assert describe_wecom_error('{"errcode":40001}') == "errcode=40001"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<html><body>login</body></html>",
+        '{"Result":0}',
+        "not json at all",
+        "",
+    ],
+)
+def test_describe_wecom_error_ignores_non_error_bodies(body):
+    assert describe_wecom_error(body) is None

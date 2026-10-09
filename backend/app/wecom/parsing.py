@@ -1,7 +1,8 @@
-"""从企业微信后台返回的数据中提取自建应用清单。"""
+"""从企业微信后台返回的数据中提取自建应用清单，并识别接口返回的错误说明。"""
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 
@@ -15,6 +16,38 @@ _AGENT_ID_PATTERN = re.compile(r"^\d{3,20}$")
 _CONSOLE_APP_ID_PATTERN = re.compile(r"^\d{3,20}$")
 _SELF_BUILT_AGENT_OPEN_ID_PATTERN = re.compile(r"^1\d{5,6}$")
 _SELF_BUILT_APP_MARKERS = ("callback_url", "url_token", "callback_aeskey")
+_WECOM_OK_ERRCODE = 0
+
+
+def describe_wecom_error(body: str) -> str | None:
+    """从企业微信接口响应里取出失败说明。
+
+    管理后台接口失败时 HTTP 状态码仍是 200，错误只写在响应体的 ``errcode`` 里，
+    因此必须解析响应体才能区分"真的写进去了"和"被后台拒绝了"。
+
+    Args:
+        body: 接口返回的响应体文本。
+
+    Returns:
+        失败时返回 ``errcode=.. msg=..`` 形式的说明；成功、非 JSON 或缺少
+        ``errcode`` 字段时返回 ``None``。
+    """
+    text = body.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or "errcode" not in payload:
+        return None
+    errcode = payload["errcode"]
+    if errcode == _WECOM_OK_ERRCODE or str(errcode).strip() == "0":
+        return None
+    errmsg = str(payload.get("errmsg") or "").strip()
+    if not errmsg:
+        return f"errcode={errcode}"
+    return f"errcode={errcode} msg={errmsg}"
 
 
 def extract_self_built_apps(payload: object) -> list[WeComApp]:
