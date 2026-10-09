@@ -73,7 +73,7 @@ class SyncService:
                 started_at,
                 public_ip=observation.ip,
                 status=SYNC_STATUS_UNCHANGED,
-                message="公网 IP 未变化，跳过同步",
+                message="公网 IP 未变化，自动同步已跳过；需要重新写入请在面板点「立即同步」",
             )
 
         template = self._storage.get_request_template()

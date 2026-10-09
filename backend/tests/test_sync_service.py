@@ -100,7 +100,29 @@ async def test_sync_skips_when_ip_unchanged(storage):
     second = await service.sync()
 
     assert second.status == "unchanged"
+    assert "立即同步" in second.message
     assert len(wecom_session.calls) == 1
+
+
+async def test_sync_retries_apps_whose_previous_attempt_failed(storage):
+    """上次写入失败的应用不能被「IP 未变化」永久跳过，必须再写一次。"""
+    prepare_storage(storage)
+    service = SyncService(
+        storage=storage,
+        resolver=FakeResolver(ip="9.9.9.9"),
+        wecom_session=FakeWeComSession(failing_agent_ids={"1230002"}),
+    )
+    first = await service.sync()
+    assert first.status == "failed"
+
+    healthy_session = FakeWeComSession()
+    recovered = await SyncService(
+        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=healthy_session
+    ).sync()
+
+    assert recovered.status == "ok"
+    assert healthy_session.calls == [("1230002", "", "9.9.9.9")]
+    assert storage.list_wecom_apps()[0].last_error is None
 
 
 async def test_sync_force_replays_even_when_ip_unchanged(storage):

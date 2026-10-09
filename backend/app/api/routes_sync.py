@@ -53,7 +53,7 @@ async def run_sync(
     sync_service: SyncService = Depends(get_sync_service),
     _session: str = Depends(require_session),
 ) -> SyncSummary:
-    """立即执行一次同步，可选择忽略 IP 未变化检查。"""
+    """立即执行一次同步；``force`` 为真时忽略 IP 未变化检查，重新写入全部应用。"""
     return await sync_service.sync(force=payload.force)
 
 

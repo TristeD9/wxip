@@ -36,7 +36,7 @@
 | 双编号支持 | 同时保存 `agentid`（7 位）与管理后台内部应用编号 `app_id`（十几位），模板里分别用 `{agent_id}` / `{app_id}` |
 | 请求模板解析 | 粘贴浏览器复制的 cURL（bash 或 cmd 格式）自动生成模板，也可直接粘贴现成模板 JSON |
 | 覆盖式同步 | 把最新公网 IP 覆盖写入所有自建应用，只保留最新一条；逐应用记录成功/失败 |
-| 定时自动同步 | 按配置间隔自动检查（默认 300 秒），IP 未变化时跳过，不产生无效请求 |
+| 定时自动同步 | 按配置间隔自动检查（默认 300 秒），IP 未变化时跳过，不产生无效请求；手动「立即同步」不受此限制 |
 | 同步历史 | 面板保留最近 100 次同步记录，含每个应用的明细 |
 | 面板管理员账号 | 首次部署创建本地管理员账号，支持修改密码；连续登录失败 5 次锁定 5 分钟 |
 | 忘记账号找回 | 提供运维命令 `list-admins` / `set-password` / `reset-admin`，容器内执行 |
@@ -196,7 +196,7 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
 
 | 页面 | 能做什么 |
 | --- | --- |
-| 仪表盘 | 当前公网 IP、应用覆盖情况、手动「立即同步」、强制覆盖、开关自动同步与调整间隔 |
+| 仪表盘 | 当前公网 IP、应用覆盖情况、手动「立即同步」（总是重新写入全部应用）、开关自动同步与调整间隔 |
 | 企业微信 | 扫码登录、自动发现应用、查看与编辑应用清单/控制台应用编号、配置请求模板 |
 | iKuai | 连接配置、测试并读取公网 IP、探测原始响应 |
 | 同步日志 | 最近 100 次同步记录，可展开查看每个应用的成功/失败与原因 |
@@ -261,7 +261,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
     {"agent_id": "1230003", "name": "报表系统", "success": true, "message": "已覆盖为 223.5.5.5"}
   ]
 }
-// status 取值：ok（有应用被覆盖）/ unchanged（IP 未变化，跳过）/ failed（有失败或前置条件缺失）
+// status 取值：ok（有应用被覆盖）/ unchanged（IP 未变化，自动同步跳过）/ failed（有失败或前置条件缺失）
 
 // POST /api/ikuai/probe —— 探测原始响应（凭据已脱敏）
 {
@@ -325,7 +325,7 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 | GET / PUT | `/api/wecom/template` | 请求模板 |
 | POST | `/api/wecom/template/parse` | 解析 cURL 生成模板预览 |
 | GET / PUT | `/api/sync/settings` | 自动同步设置 |
-| POST | `/api/sync/run` | 立即同步（可带 `force` 忽略 IP 未变化） |
+| POST | `/api/sync/run` | 立即同步；`force: true` 忽略 IP 未变化检查（面板「立即同步」固定带此参数） |
 | GET | `/api/sync/events` | 同步历史 |
 
 ## 七、已知限制

@@ -70,7 +70,6 @@ function kpi(label, value, hint) {
 }
 
 function syncPanel(state, ctx) {
-  const forceInput = h("input", { type: "checkbox" });
   const runButton = h(
     "button",
     { class: "btn btn-primary", type: "button", onClick: runSync },
@@ -97,7 +96,7 @@ function syncPanel(state, ctx) {
     try {
       const summary = await api("/api/sync/run", {
         method: "POST",
-        body: { force: forceInput.checked },
+        body: { force: true },
       });
       ctx.toast(`${syncStatusText(summary.status)}：${summary.message}`, summary.status === "failed" ? "error" : "info");
       ctx.refresh();
@@ -130,12 +129,7 @@ function syncPanel(state, ctx) {
   const body = h(
     "div",
     { class: "stack" },
-    h(
-      "div",
-      { class: "row" },
-      runButton,
-      h("label", { class: "checkbox-row" }, forceInput, "忽略 IP 未变化检查，强制覆盖"),
-    ),
+    h("div", { class: "row" }, runButton),
     h(
       "div",
       { class: "row" },
@@ -147,7 +141,9 @@ function syncPanel(state, ctx) {
 
   return panel({
     title: "同步控制",
-    subtitle: "同步会用最新公网 IP 覆盖所有自建应用的可信 IP，仅保留最新一条。",
+    subtitle:
+      "「立即同步」会用最新公网 IP 重新覆盖所有自建应用（可修复企业微信侧被改动的可信 IP）；" +
+      "自动同步只在公网 IP 变化时写入，仅保留最新一条。",
     body,
   });
 }
