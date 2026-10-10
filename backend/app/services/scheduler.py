@@ -58,7 +58,7 @@ class SyncScheduler:
             await asyncio.sleep(max(settings.interval_seconds, MIN_INTERVAL_SECONDS))
 
     async def run_once(self) -> None:
-        """自动同步开启且前置条件齐备时执行一轮同步，否则静默跳过。"""
+        """自动同步开启且前置条件齐备时执行一轮全量覆盖，否则静默跳过。"""
         settings = self._storage.get_sync_settings(self._default_settings)
         if settings.auto_enabled and self._can_sync():
             await self._sync_service.sync()

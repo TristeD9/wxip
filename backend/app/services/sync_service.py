@@ -13,7 +13,6 @@ from app.models import (
     RequestTemplate,
     SYNC_STATUS_FAILED,
     SYNC_STATUS_OK,
-    SYNC_STATUS_UNCHANGED,
     SyncAppResult,
     SyncStatus,
     SyncSummary,
@@ -57,13 +56,12 @@ class SyncService:
         self._resolver = resolver
         self._wecom_session = wecom_session
 
-    async def sync(self, *, force: bool = False) -> SyncSummary:
+    async def sync(self) -> SyncSummary:
         """解析最新公网 IP，并把所有自建应用的可信 IP 覆盖为它。
 
-        ``force`` 为真时忽略"公网 IP 未变化"的本地记录，强制重写一遍。
+        每次都全量重写，不判断公网 IP 是否变化——本地记录不代表企业微信里的真实状态。
         """
         started_at = _utc_now()
-        previous = self._storage.latest_public_ip()
 
         try:
             observation = await self._resolver.resolve(self._storage.get_ikuai_settings())
@@ -71,14 +69,6 @@ class SyncService:
             return self._fail(started_at, public_ip=None, message=str(error))
 
         self._storage.record_public_ip(observation)
-        if not force and self._is_already_synced(observation, previous):
-            return self._finish(
-                started_at,
-                public_ip=observation.ip,
-                status=SYNC_STATUS_UNCHANGED,
-                message="公网 IP 未变化，自动同步已跳过；需要重新写入请在面板点「立即同步」",
-            )
-
         template = self._storage.get_request_template()
         if template is None:
             return self._fail(started_at, observation.ip, "尚未录制可信 IP 请求模板")
@@ -150,16 +140,6 @@ class SyncService:
                 "请在企业微信页重新执行一次「自动发现应用」"
             )
         return None
-
-    def _is_already_synced(
-        self, observation: PublicIpObservation, previous: PublicIpObservation | None
-    ) -> bool:
-        if previous is None or previous.ip != observation.ip:
-            return False
-        apps = self._storage.list_wecom_apps()
-        if not apps:
-            return False
-        return all(app.last_synced_ip == observation.ip and not app.last_error for app in apps)
 
     def _fail(self, started_at: datetime, public_ip: str | None, message: str) -> SyncSummary:
         logger.error("可信 IP 同步失败：%s", message)

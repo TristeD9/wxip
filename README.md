@@ -36,7 +36,7 @@
 | 双编号支持 | 同时保存 `agentid`（7 位）与管理后台内部应用编号 `app_id`（十几位），模板里分别用 `{agent_id}` / `{app_id}` |
 | 请求模板解析 | 粘贴浏览器复制的 cURL（bash 或 cmd 格式）自动生成模板，也可直接粘贴现成模板 JSON |
 | 覆盖式同步 | 把最新公网 IP 覆盖写入所有自建应用，只保留最新一条；逐应用记录成功/失败 |
-| 定时自动同步 | 按配置间隔自动检查（默认 300 秒），公网 IP 未变化时跳过，不产生无效请求；手动「立即同步」会忽略该判断直接重写 |
+| 定时自动同步 | 按配置间隔**全量重写**（默认 300 秒）：每次都用最新公网 IP 覆盖所有自建应用，不判断 IP 是否变化 |
 | 同步历史 | 面板保留最近 100 次同步记录，含每个应用的明细 |
 | 面板管理员账号 | 首次部署创建本地管理员账号，支持修改密码；连续登录失败 5 次锁定 5 分钟 |
 | 忘记账号找回 | 提供运维命令 `list-admins` / `set-password` / `reset-admin`，容器内执行 |
@@ -194,8 +194,8 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
 
 ### 4.2 日常使用
 
-配置完成后基本不用管：默认每 5 分钟检查一次，只在公网 IP 变化时才写入；需要立刻重写时点一次
-「立即同步」（它会忽略"IP 未变化"直接覆盖一遍）。
+配置完成后基本不用管：默认每 5 分钟把最新公网 IP 覆盖写入所有自建应用一遍（不判断 IP 是否变化）；
+想立刻重写就点一次「立即同步」。
 
 | 页面 | 能做什么 |
 | --- | --- |
@@ -276,7 +276,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
     }
   ]
 }
-// status 取值：ok（有应用被覆盖）/ unchanged（公网 IP 未变化，自动同步跳过）/ failed（有失败或前置条件缺失）
+// status 取值：ok（全部覆盖成功）/ failed（有失败或前置条件缺失）
 
 // POST /api/ikuai/probe —— 探测原始响应（凭据已脱敏）
 {
@@ -340,7 +340,7 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 | GET / PUT | `/api/wecom/template` | 可信 IP 写入模板 |
 | POST | `/api/wecom/template/parse` | 解析 cURL 生成写入模板预览 |
 | GET / PUT | `/api/sync/settings` | 自动同步设置 |
-| POST | `/api/sync/run` | 立即同步；`force: true` 表示忽略"公网 IP 未变化"直接重写一遍 |
+| POST | `/api/sync/run` | 立即同步（无需请求体）：用最新公网 IP 覆盖全部自建应用 |
 | GET | `/api/sync/events` | 同步历史 |
 
 ## 七、已知限制

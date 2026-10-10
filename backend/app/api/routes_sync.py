@@ -21,12 +21,6 @@ class SyncSettingsPayload(BaseModel):
     interval_seconds: int = Field(default=300, ge=MIN_INTERVAL_SECONDS, le=86_400)
 
 
-class SyncRunPayload(BaseModel):
-    """手动触发同步的参数。"""
-
-    force: bool = False
-
-
 @router.get("/settings", response_model=SyncSettings)
 async def read_sync_settings(
     storage: AppStorage = Depends(get_storage), _session: str = Depends(require_session)
@@ -49,12 +43,11 @@ async def save_sync_settings(
 
 @router.post("/run", response_model=SyncSummary)
 async def run_sync(
-    payload: SyncRunPayload,
     sync_service: SyncService = Depends(get_sync_service),
     _session: str = Depends(require_session),
 ) -> SyncSummary:
-    """立即执行一次同步；``force`` 为真时忽略 IP 未变化检查，重新写入全部应用。"""
-    return await sync_service.sync(force=payload.force)
+    """立即执行一次同步：把最新公网 IP 覆盖写入全部自建应用。"""
+    return await sync_service.sync()
 
 
 @router.get("/events", response_model=list[SyncSummary])
@@ -65,5 +58,4 @@ async def list_sync_events(
 ) -> list[SyncSummary]:
     """返回最近的同步历史。"""
     return storage.list_sync_summaries(limit=max(1, min(limit, 200)))
-
 

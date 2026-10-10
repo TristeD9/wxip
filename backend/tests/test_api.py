@@ -56,10 +56,10 @@ class StubSyncService:
     """同步接口返回固定结果，不触发网络与浏览器。"""
 
     def __init__(self) -> None:
-        self.force_flags: list[bool] = []
+        self.sync_calls = 0
 
-    async def sync(self, *, force: bool = False) -> SyncSummary:
-        self.force_flags.append(force)
+    async def sync(self) -> SyncSummary:
+        self.sync_calls += 1
         now = datetime.now(timezone.utc)
         return SyncSummary(
             started_at=now,
@@ -208,16 +208,16 @@ def test_discover_apps_uses_session(client):
     assert response.json()["apps"][0]["agent_id"] == "1230002"
 
 
-def test_sync_run_returns_summary_and_forwards_force_flag(client):
-    response = client.post("/api/sync/run", json={"force": True})
+def test_sync_run_returns_summary(client):
+    response = client.post("/api/sync/run")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
-    assert client.app.state.sync_service.force_flags == [True]
+    assert client.app.state.sync_service.sync_calls == 1
 
 
 def test_sync_events_returns_stored_history(client):
-    client.post("/api/sync/run", json={"force": False})
+    client.post("/api/sync/run")
     response = client.get("/api/sync/events?limit=5")
 
     assert response.status_code == 200

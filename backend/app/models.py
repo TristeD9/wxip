@@ -12,6 +12,7 @@ AGENT_ID_PLACEHOLDER = "{agent_id}"
 APP_ID_PLACEHOLDER = "{app_id}"
 
 SYNC_STATUS_OK = "ok"
+# 同步现在每次都全量重写，不会再产生这个状态；保留它只是为了能读旧的同步历史
 SYNC_STATUS_UNCHANGED = "unchanged"
 SYNC_STATUS_FAILED = "failed"
 

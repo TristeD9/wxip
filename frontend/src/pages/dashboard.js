@@ -94,10 +94,7 @@ function syncPanel(state, ctx) {
   async function runSync() {
     runButton.disabled = true;
     try {
-      const summary = await api("/api/sync/run", {
-        method: "POST",
-        body: { force: true },
-      });
+      const summary = await api("/api/sync/run", { method: "POST" });
       ctx.toast(`${syncStatusText(summary.status)}：${summary.message}`, summary.status === "failed" ? "error" : "info");
       ctx.refresh();
     } catch (error) {
@@ -142,7 +139,7 @@ function syncPanel(state, ctx) {
   return panel({
     title: "同步控制",
     subtitle:
-      "同步会用最新公网 IP 覆盖所有自建应用的可信 IP，仅保留最新一条；「立即同步」会忽略「IP 未变化」直接重写一遍。",
+      "同步会用最新公网 IP 覆盖所有自建应用的可信 IP，仅保留最新一条；自动同步与「立即同步」每次都会全量重写。",
     body,
   });
 }

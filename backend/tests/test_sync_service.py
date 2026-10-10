@@ -91,7 +91,8 @@ async def test_sync_overwrites_all_apps_with_latest_ip(storage):
     assert all(app.last_synced_ip == "9.9.9.9" for app in storage.list_wecom_apps())
 
 
-async def test_sync_skips_when_ip_unchanged(storage):
+async def test_sync_rewrites_even_when_ip_unchanged(storage):
+    """公网 IP 没变也要重写：本地记录不代表企业微信里的真实状态。"""
     prepare_storage(storage)
     wecom_session = FakeWeComSession()
     service = SyncService(storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_session)
@@ -99,9 +100,8 @@ async def test_sync_skips_when_ip_unchanged(storage):
 
     second = await service.sync()
 
-    assert second.status == "unchanged"
-    assert "立即同步" in second.message
-    assert len(wecom_session.calls) == 1
+    assert second.status == "ok"
+    assert len(wecom_session.calls) == 2
 
 
 async def test_sync_retries_apps_whose_previous_attempt_failed(storage):
@@ -123,19 +123,6 @@ async def test_sync_retries_apps_whose_previous_attempt_failed(storage):
     assert recovered.status == "ok"
     assert healthy_session.calls == [("1230002", "", "9.9.9.9")]
     assert storage.list_wecom_apps()[0].last_error is None
-
-
-async def test_sync_force_replays_even_when_ip_unchanged(storage):
-    """「立即同步」传 force=True：即使公网 IP 没变也要重写一遍。"""
-    prepare_storage(storage)
-    wecom_session = FakeWeComSession()
-    service = SyncService(storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_session)
-    await service.sync()
-
-    forced = await service.sync(force=True)
-
-    assert forced.status == "ok"
-    assert len(wecom_session.calls) == 2
 
 
 async def test_sync_fails_when_template_missing(storage):

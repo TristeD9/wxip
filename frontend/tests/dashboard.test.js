@@ -93,7 +93,7 @@ describe("仪表盘渲染", () => {
 });
 
 describe("同步控制", () => {
-  it("点「立即同步」会带 force=true 调用 /api/sync/run", async () => {
+  it("点「立即同步」会调用 /api/sync/run", async () => {
     const ctx = buildContext();
     const nodes = await renderDashboardPage(ctx);
     const button = findButton(nodes, "立即同步");
@@ -102,10 +102,7 @@ describe("同步控制", () => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     await vi.waitFor(() => {
-      expect(api).toHaveBeenCalledWith("/api/sync/run", {
-        method: "POST",
-        body: { force: true },
-      });
+      expect(api).toHaveBeenCalledWith("/api/sync/run", { method: "POST" });
     });
     expect(ctx.refresh).toHaveBeenCalled();
   });

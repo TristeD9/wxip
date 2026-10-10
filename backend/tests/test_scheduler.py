@@ -13,7 +13,7 @@ class FakeSyncService:
     def __init__(self) -> None:
         self.sync_calls = 0
 
-    async def sync(self, *, force: bool = False) -> None:
+    async def sync(self) -> None:
         self.sync_calls += 1
 
 
