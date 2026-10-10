@@ -77,11 +77,3 @@ def test_reset_admin_reports_when_nothing_to_delete(tmp_path, capsys):
     assert exit_code == 1
     assert "没有删除任何账号" in capsys.readouterr().out
 
-
-def test_check_trusted_ips_reports_missing_apps(tmp_path, capsys):
-    exit_code = main(["check-trusted-ips"], settings=build_settings(tmp_path))
-
-    assert exit_code == 1
-    output = capsys.readouterr().out
-    assert "应用清单：0 个" in output
-    assert "没有应用清单" in output

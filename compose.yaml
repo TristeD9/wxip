@@ -26,7 +26,7 @@ services:
     # build:
     #   context: .
     #   args:
-    #     PLAYWRIGHT_VERSION: "1.63.0"
+    #     BASE_REGISTRY: "docker.io/library"   # 国内可换 docker.m.daocloud.io
 
     ports:
       # 默认监听所有网卡；对公网开放时建议改成 PANEL_BIND=127.0.0.1，再用 Nginx/宝塔反代并配 HTTPS

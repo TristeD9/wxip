@@ -58,15 +58,12 @@ class SyncScheduler:
             await asyncio.sleep(max(settings.interval_seconds, MIN_INTERVAL_SECONDS))
 
     async def run_once(self) -> None:
-        """开了自动同步就核对并写入；关了则只定时核对，保证面板上的读数是新鲜的。"""
+        """自动同步开启且前置条件齐备时执行一轮同步，否则静默跳过。"""
         settings = self._storage.get_sync_settings(self._default_settings)
         if settings.auto_enabled and self._can_sync():
             await self._sync_service.sync()
             return
-        if self._can_refresh():
-            await self._sync_service.refresh_trusted_ips()
-            return
-        logger.debug("定时核对前置条件未就绪，跳过本轮")
+        logger.debug("自动同步未开启或前置条件未就绪，跳过本轮")
 
     def _can_sync(self) -> bool:
         """写入需要 iKuai 配置、写入模板与应用清单齐备。"""
@@ -75,7 +72,3 @@ class SyncScheduler:
             and self._storage.get_request_template() is not None
             and bool(self._storage.list_wecom_apps())
         )
-
-    def _can_refresh(self) -> bool:
-        """只读核对不需要 iKuai 与写入模板，有应用清单就能读。"""
-        return bool(self._storage.list_wecom_apps())

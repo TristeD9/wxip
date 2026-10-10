@@ -39,8 +39,3 @@ export function loginStatusTone(state) {
   const map = { logged_in: "ok", waiting_scan: "warn", failed: "error" };
   return map[state?.status] || "muted";
 }
-
-export function describeTrustedIps(app) {
-  if (!Array.isArray(app?.current_trusted_ips)) return "未知";
-  return app.current_trusted_ips.length ? app.current_trusted_ips.join("、") : "未设置";
-}

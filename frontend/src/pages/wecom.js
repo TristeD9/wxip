@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { badge, emptyRow, field, h, notice, panel } from "../dom.js";
-import { describeTrustedIps, formatTime, loginStatusText, loginStatusTone } from "../format.js";
+import { loginStatusText, loginStatusTone } from "../format.js";
 import { icon } from "../icons.js";
 
 const LOGIN_POLL_INTERVAL_MS = 2000;
@@ -112,22 +112,11 @@ function appsPanel(apps, ctx) {
           h("td", { class: "mono", text: app.agent_id }),
           h("td", { text: app.name }),
           h("td", { class: "mono", text: app.console_app_id || "-" }),
-          h(
-            "td",
-            {},
-            h("div", { class: "mono", text: describeTrustedIps(app) }),
-            h("div", {
-              class: "kpi-hint",
-              text: app.trusted_ip_checked_at
-                ? `读取于 ${formatTime(app.trusted_ip_checked_at)}`
-                : "尚未读取",
-            }),
-          ),
           h("td", { class: "mono", text: app.last_synced_ip || "-" }),
           h("td", { text: app.last_error || "-" }),
         ),
       )
-    : [emptyRow(6, "暂无应用数据")];
+    : [emptyRow(5, "暂无应用数据")];
 
   return panel({
     title: "自建应用清单",
@@ -152,7 +141,6 @@ function appsPanel(apps, ctx) {
               h("th", { text: "AgentId" }),
               h("th", { text: "应用名称" }),
               h("th", { text: "控制台应用编号" }),
-              h("th", { text: "当前可信 IP（企业微信）" }),
               h("th", { text: "最近覆盖 IP" }),
               h("th", { text: "最近错误" }),
             ),

@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { badge, emptyRow, h, notice, panel } from "../dom.js";
-import { describeTrustedIps, formatTime, syncStatusText, syncStatusTone } from "../format.js";
+import { formatTime, syncStatusText, syncStatusTone } from "../format.js";
 import { icon } from "../icons.js";
 
 export async function renderDashboardPage(ctx) {
@@ -10,7 +10,7 @@ export async function renderDashboardPage(ctx) {
   ]);
   const apps = state.apps || [];
   const latestIp = state.latest_public_ip?.ip || null;
-  const syncedApps = apps.filter((app) => isTrustedIpCurrent(app, latestIp));
+  const syncedApps = apps.filter((app) => app.last_synced_ip === latestIp && !app.last_error);
   const nodes = [];
 
   if (state.wecom_login.status !== "logged_in") {
@@ -76,12 +76,6 @@ function syncPanel(state, ctx) {
     icon("play"),
     "立即同步",
   );
-  const refreshButton = h(
-    "button",
-    { class: "btn", type: "button", onClick: refreshTrustedIps },
-    icon("refresh"),
-    "获取当前可信 IP",
-  );
   const autoInput = h("input", { type: "checkbox", checked: state.sync_settings.auto_enabled });
   const intervalInput = h("input", {
     type: "number",
@@ -113,19 +107,6 @@ function syncPanel(state, ctx) {
     }
   }
 
-  async function refreshTrustedIps() {
-    refreshButton.disabled = true;
-    try {
-      const result = await api("/api/sync/refresh-trusted-ips", { method: "POST" });
-      ctx.toast(result.message, result.failed ? "error" : "info");
-      ctx.refresh();
-    } catch (error) {
-      ctx.toast(error.message, "error");
-    } finally {
-      refreshButton.disabled = false;
-    }
-  }
-
   async function saveSettings() {
     saveButton.disabled = true;
     try {
@@ -148,7 +129,7 @@ function syncPanel(state, ctx) {
   const body = h(
     "div",
     { class: "stack" },
-    h("div", { class: "row" }, runButton, refreshButton),
+    h("div", { class: "row" }, runButton),
     h(
       "div",
       { class: "row" },
@@ -156,18 +137,12 @@ function syncPanel(state, ctx) {
       h("label", { class: "checkbox-row" }, "间隔（秒）", intervalInput),
       saveButton,
     ),
-    h("div", {
-      class: "kpi-hint",
-      text:
-        "「获取当前可信 IP」只读不写，随时核对；关闭自动同步后仍会按间隔读取当前可信 IP，" +
-        "但不会自动覆盖。",
-    }),
   );
 
   return panel({
     title: "同步控制",
     subtitle:
-      "「立即同步」先读取各应用当前可信 IP，只覆盖与最新公网 IP 不一致的应用，最终只保留最新一条。",
+      "同步会用最新公网 IP 覆盖所有自建应用的可信 IP，仅保留最新一条；「立即同步」会忽略「IP 未变化」直接重写一遍。",
     body,
   });
 }
@@ -180,28 +155,25 @@ function appsPanel(apps, latestIp) {
           {},
           h("td", { text: app.name }),
           h("td", { class: "mono", text: app.agent_id }),
+          h("td", { class: "mono", text: app.last_synced_ip || "-" }),
           h(
             "td",
             {},
-            h("div", { class: "mono", text: describeTrustedIps(app) }),
-            h("div", {
-              class: "kpi-hint",
-              text: app.trusted_ip_checked_at
-                ? `读取于 ${formatTime(app.trusted_ip_checked_at)}`
-                : "尚未读取",
-            }),
+            app.last_error
+              ? badge("失败", "error")
+              : app.last_synced_ip === latestIp && latestIp
+                ? badge("已是最新", "ok")
+                : badge("待同步", "muted"),
           ),
-          h("td", {}, appStatusBadge(app, latestIp)),
-          h("td", { class: "mono", text: app.last_synced_ip || "-" }),
           h("td", { text: formatTime(app.last_synced_at) }),
           h("td", { class: "mono", text: app.last_error || "-" }),
         ),
       )
-    : [emptyRow(7, "暂无应用数据")];
+    : [emptyRow(6, "暂无应用数据")];
 
   return panel({
     title: "自建应用",
-    subtitle: "「当前可信 IP」是企业微信后台的真实读数；未配置读取模板或读取失败时显示为未知。",
+    subtitle: "可信 IP 状态来自最近一次成功写入的记录。",
     body: h(
       "div",
       { class: "table-wrap" },
@@ -216,9 +188,8 @@ function appsPanel(apps, latestIp) {
             {},
             h("th", { text: "应用名称" }),
             h("th", { text: "AgentId" }),
-            h("th", { text: "当前可信 IP（企业微信）" }),
-            h("th", { text: "状态" }),
             h("th", { text: "最近覆盖 IP" }),
+            h("th", { text: "状态" }),
             h("th", { text: "覆盖时间" }),
             h("th", { text: "最近错误" }),
           ),
@@ -227,21 +198,6 @@ function appsPanel(apps, latestIp) {
       ),
     ),
   });
-}
-
-function isTrustedIpCurrent(app, latestIp) {
-  if (!latestIp) return false;
-  if (Array.isArray(app.current_trusted_ips)) {
-    return app.current_trusted_ips.length === 1 && app.current_trusted_ips[0] === latestIp;
-  }
-  // 还没读到真实值时退回本地记录，避免未配置读取模板的部署显示成"全部未覆盖"
-  return app.last_synced_ip === latestIp;
-}
-
-function appStatusBadge(app, latestIp) {
-  if (app.last_error) return badge("失败", "error");
-  if (!Array.isArray(app.current_trusted_ips)) return badge("未知", "muted");
-  return isTrustedIpCurrent(app, latestIp) ? badge("已最新", "ok") : badge("待更新", "warn");
 }
 
 function recentEventsPanel(events) {

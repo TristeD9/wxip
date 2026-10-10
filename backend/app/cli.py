@@ -5,20 +5,17 @@
     python -m app.cli list-admins
     python -m app.cli set-password --username admin
     python -m app.cli reset-admin
-    python -m app.cli check-trusted-ips
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import getpass
 import sys
 
 from app.config import Settings
 from app.passwords import check_password_strength, hash_password
 from app.storage import AppStorage
-from app.wecom.admin_browser import WeComAdminError, WeComAdminSession
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,9 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reset_admin.add_argument("--username", default=None, help="只删除指定用户；省略时全部删除")
 
-    subparsers.add_parser(
-        "check-trusted-ips", help="只读读取各应用当前可信 IP，逐条打印结果用于排查"
-    )
     return parser
 
 
@@ -58,8 +52,6 @@ def main(argv: list[str] | None = None, settings: Settings | None = None) -> int
         return _set_password(storage, args.username, args.password)
     if args.command == "reset-admin":
         return _reset_admin(storage, args.username)
-    if args.command == "check-trusted-ips":
-        return _check_trusted_ips(app_settings, storage)
     return 1
 
 
@@ -101,44 +93,6 @@ def _reset_admin(storage: AppStorage, username: str | None) -> int:
     return 0
 
 
-def _check_trusted_ips(settings: Settings, storage: AppStorage) -> int:
-    """只读复现一次"读取当前可信 IP"，把结果打到终端，便于排查读取失败。"""
-    return asyncio.run(_check_trusted_ips_async(settings, storage))
-
-
-async def _check_trusted_ips_async(settings: Settings, storage: AppStorage) -> int:
-    apps = storage.list_wecom_apps()
-    print(f"应用清单：{len(apps)} 个")
-    print(f"写入模板：{'已配置' if storage.get_request_template() else '未配置'}")
-    if not apps:
-        print("没有应用清单，请先到面板「企业微信」页自动发现或手工导入。")
-        return 1
-
-    session = WeComAdminSession(
-        state_path=settings.wecom_state_path,
-        headless=settings.browser_headless,
-        channel=settings.browser_channel,
-        timeout_ms=settings.browser_timeout_ms,
-        apps_url_provider=storage.get_wecom_apps_url,
-    )
-    try:
-        trusted_ips_by_agent = await session.read_app_trusted_ips()
-    except WeComAdminError as error:
-        print(f"读取失败：{error}")
-        return 1
-    finally:
-        await session.close()
-
-    missing = 0
-    for app in apps:
-        if app.agent_id not in trusted_ips_by_agent:
-            missing += 1
-            print(f"[{app.agent_id}] {app.name}：未读到（控制台编号 {app.console_app_id or '未填'}）")
-            continue
-        trusted_ips = trusted_ips_by_agent[app.agent_id]
-        print(f"[{app.agent_id}] {app.name}：当前可信 IP = {'、'.join(trusted_ips) or '（空）'}")
-    print(f"\n完成：{len(apps) - missing}/{len(apps)} 个应用读到当前可信 IP。")
-    return 0 if missing == 0 else 1
 
 
 if __name__ == "__main__":

@@ -5,9 +5,7 @@ import pytest
 from app.models import WeComApp
 from app.wecom.parsing import (
     describe_wecom_error,
-    extract_app_trusted_ips,
     extract_self_built_apps,
-    extract_trusted_ips,
     merge_app_states,
     parse_manual_app_list,
 )
@@ -192,7 +190,9 @@ def test_parse_manual_app_list_keeps_spaces_in_app_name():
     assert apps[0].console_app_id is None
 
 
-@pytest.mark.parametrize("body", ['{"errcode":0,"errmsg":"ok"}', '{"errcode":"0","errmsg":"ok"}'])
+@pytest.mark.parametrize(
+    "body", ['{"errcode":0,"errmsg":"ok"}', '{"errcode":"0","errmsg":"ok"}']
+)
 def test_describe_wecom_error_returns_none_for_success(body):
     assert describe_wecom_error(body) is None
 
@@ -218,125 +218,3 @@ def test_describe_wecom_error_handles_missing_errmsg():
 )
 def test_describe_wecom_error_ignores_non_error_bodies(body):
     assert describe_wecom_error(body) is None
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        '{"data":{"trusted_ip_list":["203.0.113.10"]}}',
-        '{"data":{"ip_list":["203.0.113.10"]}}',
-        '{"data":{"ipList":["203.0.113.10"]}}',
-        '{"data":{"trusted_ip":"203.0.113.10"}}',
-    ],
-)
-def test_extract_trusted_ips_reads_known_keys(body):
-    assert extract_trusted_ips(body) == ["203.0.113.10"]
-
-
-def test_extract_trusted_ips_splits_string_value():
-    body = '{"ip_list":"203.0.113.10, 203.0.113.11"}'
-
-    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
-
-
-def test_extract_trusted_ips_returns_empty_list_when_backend_has_none():
-    assert extract_trusted_ips('{"data":{"trusted_ip_list":[]}}') == []
-
-
-def test_extract_trusted_ips_reads_service_ip_info_list():
-    """真实后台返回里企业可信IP 放在 service_ip_info_list。"""
-    body = (
-        '{"data":{"servicecorp_ip_list":[],"invalid_ip_list":[],'
-        '"service_ip_info_list":["203.0.113.10"]}}'
-    )
-
-    assert extract_trusted_ips(body) == ["203.0.113.10"]
-
-
-def test_extract_trusted_ips_reads_object_entries():
-    body = (
-        '{"data":{"service_ip_info_list":['
-        '{"ip":"203.0.113.10","status":1},{"ip":"203.0.113.11","status":0}]}}'
-    )
-
-    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
-
-
-def test_extract_trusted_ips_returns_empty_for_empty_known_field():
-    body = (
-        '{"data":{"servicecorp_ip_list":[],"invalid_ip_list":[],'
-        '"service_ip_info_list":[]}}'
-    )
-
-    assert extract_trusted_ips(body) == []
-
-
-def test_extract_app_trusted_ips_maps_entries_by_agent_id():
-    payload = {
-        "data": {
-            "openapi_app": [
-                {"agentid": 1230002, "name": "客服系统", "ip_list": ["203.0.113.10"]},
-                {"agentid": 1230003, "name": "报表系统", "ip_list": []},
-            ]
-        }
-    }
-
-    assert extract_app_trusted_ips(payload) == {"1230002": ["203.0.113.10"], "1230003": []}
-
-
-def test_extract_app_trusted_ips_learns_field_name_from_sibling_app():
-    """字段名不重要：只要有一个应用条目里确实装着 IP，就按同一字段名读其余应用。"""
-    payload = {
-        "data": {
-            "openapi_app": [
-                {"agentid": 1230002, "trusted_ip_whitelist": ["203.0.113.10"]},
-                {"agentid": 1230003, "trusted_ip_whitelist": ["203.0.113.11", "203.0.113.12"]},
-            ]
-        }
-    }
-
-    assert extract_app_trusted_ips(payload) == {
-        "1230002": ["203.0.113.10"],
-        "1230003": ["203.0.113.11", "203.0.113.12"],
-    }
-
-
-def test_extract_app_trusted_ips_ignores_system_apps():
-    payload = {
-        "data": {
-            "corp_app_list": [
-                {"app_id": "5629500000000003", "app_open_id": "2000002", "ip_list": ["1.1.1.1"]}
-            ]
-        }
-    }
-
-    assert extract_app_trusted_ips(payload) == {}
-
-
-def test_extract_app_trusted_ips_returns_empty_when_no_entry_holds_ips():
-    """所有条目都没有 IP 时返回空字典，表示读不出来，而不是"没有可信 IP"。"""
-    payload = {
-        "data": {"openapi_app": [{"agentid": 1230002, "name": "客服系统", "ip_list": []}]}
-    }
-
-    assert extract_app_trusted_ips(payload) == {}
-
-
-def test_extract_trusted_ips_falls_back_to_plain_ip_array():
-    body = '{"result":{"items":["203.0.113.10","203.0.113.11"]}}'
-
-    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        "<html><body>login</body></html>",
-        '{"errcode":0,"errmsg":"ok"}',
-        '{"data":{"ip_list":["not-an-ip"]}}',
-        '{"data":{"name":"客服系统"}}',
-        "not json at all",
-    ],
-)
-def test_extract_trusted_ips_returns_none_when_unreadable(body):
-    assert extract_trusted_ips(body) is None

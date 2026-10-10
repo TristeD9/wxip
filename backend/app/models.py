@@ -44,8 +44,6 @@ class WeComApp(BaseModel):
     console_app_id: str | None = None
     last_synced_ip: str | None = None
     last_synced_at: datetime | None = None
-    current_trusted_ips: list[str] | None = None
-    trusted_ip_checked_at: datetime | None = None
     last_error: str | None = None
 
 
@@ -116,15 +114,6 @@ class SyncSettings(BaseModel):
     interval_seconds: int = 300
 
 
-class TrustedIpCheckSummary(BaseModel):
-    """一次"只读核对当前可信 IP"的结果。"""
-
-    checked_at: datetime
-    total: int
-    failed: int
-    message: str
-
-
 class IpProviderProbe(BaseModel):
     """iKuai 探测请求的原始返回，用于前端排障。"""
 
@@ -150,4 +139,3 @@ class AdminAccount(BaseModel):
     password_hash: str
     created_at: datetime
     updated_at: datetime
-

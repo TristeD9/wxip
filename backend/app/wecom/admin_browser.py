@@ -17,12 +17,7 @@ from playwright.async_api import async_playwright
 
 from app.models import RequestTemplate, WeComApp, WeComLoginState
 from app.wecom.curl_template import filter_replay_headers
-from app.wecom.parsing import (
-    describe_wecom_error,
-    extract_app_trusted_ips,
-    extract_self_built_apps,
-    extract_trusted_ips,
-)
+from app.wecom.parsing import describe_wecom_error, extract_self_built_apps
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +38,6 @@ _QR_PAGE_CONTAINER_SELECTORS = (".ww_wechatQrCode", "#wx_reg")
 _RECORDED_RESOURCE_TYPES = {"xhr", "fetch", "document"}
 _MAX_RECORDED_BODY_CHARS = 200_000
 _DEBUG_FILE_NAME = "wecom_discover_debug.json"
-_READ_DEBUG_FILE_NAME = "wecom_read_debug.json"
 # 会话失效时后台返回的是登录页网页，用这些特征把它和正常 JSON 响应区分开
 _LOGIN_PAGE_MARKERS = ("loginpage_wx", "login_qrcode", "ww_login_qrcode", "扫码登录")
 
@@ -120,23 +114,6 @@ class WeComAdminSession:
                 "未能在应用管理页捕获到自建应用列表（详情见 data/wecom_discover_debug.json），"
                 "或在页面中手工粘贴应用清单"
             )
-
-    async def read_app_trusted_ips(self) -> dict[str, list[str]]:
-        """从应用管理页的列表响应里读出每个应用当前的可信 IP。
-
-        后台的应用列表接口一次返回所有自建应用的配置，比逐个应用单独读取更省请求。
-
-        Returns:
-            ``{agent_id: [ip, ...]}``；读不出来时返回空字典，调用方必须把它当成
-            "读不到"，而不是"当前没有可信 IP"。
-        """
-        async with self._operation_lock:
-            await self._ensure_logged_in_locked()
-            for payload in await self._capture_app_list_payloads():
-                trusted_ips = extract_app_trusted_ips(payload)
-                if trusted_ips:
-                    return trusted_ips
-            return {}
 
     async def _capture_app_list_payloads(self) -> list[object]:
         """打开应用管理页，返回后台应用列表响应的 JSON 载荷（调用方需已持有操作锁）。"""
@@ -241,31 +218,6 @@ class WeComAdminSession:
             if error_detail is not None:
                 raise WeComAdminError(f"企业微信拒绝了本次请求：{error_detail}")
             return text
-
-    async def read_trusted_ips(
-        self, template: RequestTemplate, *, agent_id: str, app_id: str, ip: str
-    ) -> list[str] | None:
-        """读取该应用当前的可信 IP；解析不出来时返回 None 并把原始响应留档。"""
-        text = await self.replay_request(template, agent_id=agent_id, app_id=app_id, ip=ip)
-        trusted_ips = extract_trusted_ips(text)
-        if not trusted_ips:
-            # 读不出来、或读成空列表时都留档：空列表很可能是字段名挑错了
-            await self._dump_read_debug(agent_id=agent_id, response_text=text)
-        return trusted_ips
-
-    async def _dump_read_debug(self, *, agent_id: str, response_text: str) -> None:
-        """把读不出可信 IP 的响应写盘，便于按真实结构补解析规则。"""
-        payload = {
-            "agent_id": agent_id,
-            "recorded_at": datetime.now(timezone.utc).isoformat(),
-            "response_sample": response_text[:4000],
-        }
-        try:
-            self._state_path.parent.joinpath(_READ_DEBUG_FILE_NAME).write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except OSError as error:
-            logger.warning("写入可信 IP 读取调试文件失败：%s", error)
 
     async def _ensure_logged_in_locked(self, *, verify_session: bool = False) -> None:
         """在已持有操作锁的情况下确认登录态，必要时用已保存的登录态恢复。

@@ -40,46 +40,6 @@ def test_request_template_round_trip(storage):
     assert storage.get_request_template() == template
 
 
-def test_record_app_trusted_ips_round_trip(storage):
-    storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
-
-    storage.record_app_trusted_ips(
-        "1230006", ips=["203.0.113.10"], checked_at="2026-01-01T00:00:00+00:00"
-    )
-
-    stored_app = storage.list_wecom_apps()[0]
-    assert stored_app.current_trusted_ips == ["203.0.113.10"]
-    assert stored_app.trusted_ip_checked_at == datetime.fromisoformat(
-        "2026-01-01T00:00:00+00:00"
-    )
-
-
-def test_record_app_trusted_ips_clears_previous_error(storage):
-    storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
-    storage.update_app_sync_result(
-        "1230006", synced_ip=None, synced_at=None, error="企业微信返回 HTTP 500"
-    )
-
-    storage.record_app_trusted_ips(
-        "1230006", ips=["203.0.113.10"], checked_at="2026-01-01T00:00:00+00:00"
-    )
-
-    assert storage.list_wecom_apps()[0].last_error is None
-
-
-def test_update_app_error_keeps_synced_record(storage):
-    storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
-    storage.update_app_sync_result(
-        "1230006", synced_ip="8.8.8.8", synced_at="2026-01-01T00:00:00+00:00", error=None
-    )
-
-    storage.update_app_error("1230006", "响应里没有可识别的可信 IP 列表")
-
-    stored_app = storage.list_wecom_apps()[0]
-    assert stored_app.last_error == "响应里没有可识别的可信 IP 列表"
-    assert stored_app.last_synced_ip == "8.8.8.8"
-
-
 def test_initialize_upgrades_legacy_apps_table(tmp_path):
     """老库升级后要自动长出新增的列，且原有数据不丢。"""
     database_path = tmp_path / "legacy.sqlite3"
@@ -109,8 +69,6 @@ def test_initialize_upgrades_legacy_apps_table(tmp_path):
     assert upgraded_app.name == "客服系统"
     assert upgraded_app.last_synced_ip == "8.8.8.8"
     assert upgraded_app.console_app_id is None
-    assert upgraded_app.current_trusted_ips is None
-    assert upgraded_app.trusted_ip_checked_at is None
 
 
 def test_sync_settings_fall_back_to_default(storage):

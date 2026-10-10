@@ -23,7 +23,7 @@
 | --- | --- |
 | 系统 | Linux x86_64（Windows/macOS 装 Docker Desktop 也可以） |
 | Docker | 20.10 以上，且带 **Docker Compose v2**（`docker compose version` 有输出） |
-| 磁盘 | 至少留 6 GB（镜像解压后 3.73 GB，加上数据） |
+| 磁盘 | 3 GB 可用足够（镜像已只带 Chromium，比旧版小很多） |
 | 内存 | 至少 1.5 GB 可用（容器内要跑 Chromium） |
 
 ### 2.2 网络（三条硬性要求，缺一不可）
@@ -176,7 +176,7 @@ docker compose up -d
 ```bash
 # 有网的机器
 docker pull YOUR_DOCKERHUB/wxip:latest
-docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 约 1.0 GB
+docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 体积以导出结果为准
 
 # 拷到目标机器后
 gunzip -c wxip-image.tar.gz | docker load
@@ -219,10 +219,7 @@ docker compose up -d
    - **通用方式**（企业微信后台改版后用这个）：在管理后台手动改一次任意应用的可信 IP，用浏览器开发者工具对该请求 → 复制 → **Copy as cURL**，粘贴到面板「粘贴 cURL」→ 解析 → 保存。
 
    模板里必须出现两个占位符：`{ip}`（要写入的公网 IP）和 `{app_id}` 或 `{agent_id}`（应用编号）。保存时面板会校验，缺 `{ip}` 会直接报错。
-6. **当前可信 IP 不用额外配置**：同步时会从企业微信「应用管理页」的列表响应里自动读取每个应用当前
-   的可信 IP，写入后还会回读校验。读取有问题时用
-   `docker exec -it wecom-trusted-ip python -m app.cli check-trusted-ips` 排查。
-7. 回仪表盘点「立即同步」，确认应用表格里的「当前可信 IP」已变成最新公网 IP，再按需保持自动同步开启。
+6. 回仪表盘点「立即同步」，确认日志出现「已覆盖 N/N 个应用的可信 IP」，再按需保持自动同步开启。
 
 ---
 
@@ -312,18 +309,15 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 | `docker compose up` 报 `required variable APP_SECRET_KEY is missing` | 没有 `.env` 或里面没填 `APP_SECRET_KEY`，按 4.1 重新生成 |
 | 拉镜像卡住/超时 | 国内网络问题，按 4.3 配镜像加速或离线导入 |
 | 8000 端口起不来 | 端口被占用，改 `.env` 的 `PANEL_BIND` 或 compose 里的端口映射 |
-| 面板提示「企业微信管理后台尚未登录」 | 需要重新扫码；**每次容器/服务重启后都要重扫一次**（企业微信登录态不落盘） |
+| 面板提示「企业微信管理后台尚未登录」 | 需要重新扫码。登录态保存在 `DATA_DIR/wecom_state.json`、重启后会复用，但在企业微信官网/手机端重新登录会把容器里的会话挤下线 |
 | 自动发现应用失败 | 看 `DATA_DIR/wecom_discover_debug.json`，里面有页面信息和抓到的响应摘要；把它发给维护者适配 |
 | 同步报「模板需要 {app_id}」 | 该应用缺少"控制台应用编号"（正常会自动发现）。先到企业微信页重新点一次「自动发现应用」；若仍为空，再用 API `PUT /api/wecom/apps/{agent_id}/console-app-id` 补录 |
 | iKuai 报 `Post data error` | 老版本已修复；升级到最新镜像（v0.1.0 起支持 JSON 报文登录） |
-| 同步显示「公网 IP 未变化，自动同步已跳过」 | 只在还没有应用清单时出现；正常配置下每轮都会核对真实状态 |
-| 「当前可信 IP」一直显示未知 | 说明默认读取没成功。先在容器里跑 `docker exec -it wecom-trusted-ip python -m app.cli check-trusted-ips`，它会逐条打印每个应用读到什么，以及读不到的原因 |
+| 同步显示「公网 IP 未变化，自动同步已跳过」 | 正常状态：说明已是最新 IP。想强制重写就点一次「立即同步」 |
 | 同步报「企业微信返回了登录页，登录态已失效」 | 你（或同事）在企业微信官网/手机端重新扫码，把容器里的会话挤下线了；到面板「企业微信」页重新扫码登录即可 |
 | 同步报「返回的是网页而不是接口 JSON」 | 该请求没有落到真正的后台接口上，通常是模板录错（比如复制成了页面请求）或企业微信改版，重新录制对应模板 |
-| 同步报「写入已提交，但回读校验不通过」 | 后台接受了写入、但再读回来仍是旧值。先点一次「立即同步」重试；若持续出现，把该应用在企业微信后台的「企业可信IP」截图发给维护者 |
 | 想看当前公网 IP | 面板仪表盘首页，或 iKuai 页点「测试并读取公网 IP」 |
-| 想知道企业微信里现在配的是哪个可信 IP | 仪表盘点「获取当前可信 IP」（只读，不发写入请求）；开启自动同步后每轮也会自动读取一次，「当前可信 IP」列旁边会显示读取时间 |
-| 关掉自动同步后还会发请求吗 | 会，但只发**只读**的读取请求（默认每 300 秒一轮），用来刷新面板上的「当前可信 IP」；不会自动修改企业微信里的配置 |
+| 想知道企业微信里现在配的是哪个可信 IP | 打开企业微信后台对应应用的「企业可信IP」查看；本工具只负责把它覆盖成最新公网 IP |
 
 ---
 
@@ -334,7 +328,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 | 镜像地址 | 你自己构建并推送的地址，例如 `docker.io/YOUR_DOCKERHUB/wxip:latest` |
 | Digest | `sha256:69715235ecd565b9f3c95141daa81481573b9a79e1cd304d144646cb3a540674` |
 | 压缩体积 | 约 1028 MB |
-| 解压体积 | 3.73 GB |
+| 体积 | 已换成 `python:3.12-slim` + 仅 Chromium，比旧版（解压 3.73 GB）小很多，具体以构建结果为准 |
 | 基础镜像 | `mcr.microsoft.com/playwright/python:v1.63.0-noble`（自带 Chromium 153） |
 | 架构 | linux/amd64 |
 

@@ -1,10 +1,14 @@
 name: Build and push image
 
-# 只在手动触发时运行，推代码不会自动构建推送。
 # 触发方式：
-#   1) GitHub 仓库 Actions 页面 → 左侧「Build and push image」→ Run workflow
-#   2) 命令行：gh workflow run "Build and push image" --repo TristeD9/wxip --ref main
+#   1) 推送 v* 标签（例如 v1.0.0）：构建并把版本号一起打进镜像标签
+#   2) 手动触发：Actions 页面 →「Build and push image」→ Run workflow
+#   3) 命令行：gh workflow run "Build and push image" --repo TristeD9/wxip --ref main
+# 普通推送代码不会自动构建。
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 # 连续手动触发时取消上一次未完成的构建，避免并发推送互相覆盖
@@ -19,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 镜像解压后接近 4 GB，runner 默认磁盘偏紧，先清掉用不到的大目录
+      # runner 自带不少用不到的大目录，先清掉腾出磁盘
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -63,8 +67,10 @@ jobs:
         with:
           images: ${{ steps.hub.outputs.username }}/wxip
           tags: |
-            # 每次手动触发都推 latest（默认分支）和 sha-<短 commit>，后者便于回滚到具体版本
+            # 每次触发都推 latest（默认分支）和 sha-<短 commit>，后者便于回滚到具体版本；
+            # 打 v* 标签时再额外推一个版本号标签（如 v1.0.0）
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
             type=sha,format=short
 
       - name: Build and push
@@ -77,3 +83,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 基础镜像从 Playwright 官方镜像换成 python:slim 后，必须确认 Chromium 能真跑起来，
+      # 否则使用者会在第一次扫码时才发现缺系统库
+      - name: Smoke test pushed image
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          IMAGE="$(printf '%s\n' "$IMAGE_TAGS" | head -n1)"
+          echo "smoke test image: $IMAGE"
+          docker pull "$IMAGE"
+          docker run --rm "$IMAGE" python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage']); b.close(); p.stop(); print('chromium ok')"
+          docker run -d --name wxip-smoke -e APP_SECRET_KEY=smoke-test -e APP_DATA_DIR=/tmp/data -p 18123:8000 "$IMAGE"
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18123/api/health; then echo; break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:18123/api/health
+          docker rm -f wxip-smoke

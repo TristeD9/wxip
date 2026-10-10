@@ -35,9 +35,8 @@
 | 自动发现自建应用 | 从管理后台抓取应用清单，自动排除系统内置应用（通讯录同步助手、外部联系人等）与腾讯官方应用 |
 | 双编号支持 | 同时保存 `agentid`（7 位）与管理后台内部应用编号 `app_id`（十几位），模板里分别用 `{agent_id}` / `{app_id}` |
 | 请求模板解析 | 粘贴浏览器复制的 cURL（bash 或 cmd 格式）自动生成模板，也可直接粘贴现成模板 JSON |
-| 读取当前可信 IP | 直接从企业微信「应用管理页」的列表响应里读取，**不需要额外录制模板**；面板有「获取当前可信 IP」按钮随时只读刷新，自动同步每轮也会读取 |
-| 按比对结果同步 | 先读各应用当前可信 IP，与最新公网 IP 比对，**只覆盖不一致的应用**；写入后还会再读一次做**回读校验**，对不上直接报失败 |
-| 定时核对与写入 | 按配置间隔（默认 300 秒）自动核对：开着自动同步时核对 + 只覆盖不一致的应用，**关闭后仍定时只读核对**（面板读数保持新鲜，但不会自动改配置） |
+| 覆盖式同步 | 把最新公网 IP 覆盖写入所有自建应用，只保留最新一条；逐应用记录成功/失败 |
+| 定时自动同步 | 按配置间隔自动检查（默认 300 秒），公网 IP 未变化时跳过，不产生无效请求；手动「立即同步」会忽略该判断直接重写 |
 | 同步历史 | 面板保留最近 100 次同步记录，含每个应用的明细 |
 | 面板管理员账号 | 首次部署创建本地管理员账号，支持修改密码；连续登录失败 5 次锁定 5 分钟 |
 | 忘记账号找回 | 提供运维命令 `list-admins` / `set-password` / `reset-admin`，容器内执行 |
@@ -51,7 +50,7 @@
 | --- | --- |
 | 机器 | Linux x86_64（VPS / 群晖等 NAS 均可）；Windows/macOS 装 Docker Desktop 也行 |
 | Docker | 20.10+ 且带 Compose v2（`docker compose version` 有输出） |
-| 磁盘 | 至少 6 GB 可用（镜像解压后 3.73 GB + 数据） |
+| 磁盘 | 3 GB 可用足够（镜像已只带 Chromium，比旧版小很多；以下载体积为准） |
 | 内存 | 至少 1.5 GB 可用（容器内要跑 Chromium） |
 | 网络 | ① 能访问 iKuai 管理地址 ② 能访问 `work.weixin.qq.com` ③ 能拉 Docker Hub |
 | 账号 | 企业微信管理员（能扫码进后台、能改可信 IP）+ iKuai Web 账号密码 |
@@ -145,7 +144,7 @@ docker pull docker.m.daocloud.io/YOUR_DOCKERHUB/wxip:latest
 docker tag  docker.m.daocloud.io/YOUR_DOCKERHUB/wxip:latest YOUR_DOCKERHUB/wxip:latest
 
 # C. 完全离线
-docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 约 1.0 GB
+docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 体积以下载/导出结果为准
 # 目标机器：gunzip -c wxip-image.tar.gz | docker load
 ```
 
@@ -191,25 +190,17 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
    模板里必须出现 `{ip}`（要写入的公网 IP）和 `{app_id}` 或 `{agent_id}`（应用编号），
    缺少 `{ip}` 时面板会直接拒绝保存。
 
-6. **当前可信 IP 不用配置**：同步时会打开「应用管理页」，从后台自己发出的应用列表响应里读出每个
-   应用当前的可信 IP，写入后再回读一次确认。读取失败时用
-   `python -m app.cli check-trusted-ips` 排查即可。
+6. 回仪表盘点「立即同步」，确认日志出现「已覆盖 N/N 个应用的可信 IP」，再按需保持自动同步开启。
 
 ### 4.2 日常使用
 
-配置完成后基本不用管：
-
-- 「立即同步」：现在就读一遍各应用当前可信 IP，只覆盖与最新公网 IP 不一致的；
-- 「获取当前可信 IP」：只读不写，随时核对面板上的读数与真实值是否一致；
-- 自动同步开着时，每 5 分钟自动核对并只写不一致的；**关掉之后仍会每 5 分钟只读核对一次**，
-  面板读数不会变旧，但不会自动修改企业微信配置。
-
-（只有连应用清单都还没有时才退化为"公网 IP 没变就不写"，正常配置下每轮都会核对真实状态。）
+配置完成后基本不用管：默认每 5 分钟检查一次，只在公网 IP 变化时才写入；需要立刻重写时点一次
+「立即同步」（它会忽略"IP 未变化"直接覆盖一遍）。
 
 | 页面 | 能做什么 |
 | --- | --- |
-| 仪表盘 | 当前公网 IP、每个应用的**当前可信 IP**与覆盖情况、只读「获取当前可信 IP」、手动「立即同步」、开关自动同步与调整间隔 |
-| 企业微信 | 扫码登录、自动发现应用（含 AgentId 与控制台应用编号）、每个应用的当前可信 IP、配置写入模板与备用读取模板 |
+| 仪表盘 | 当前公网 IP、应用覆盖情况、手动「立即同步」、开关自动同步与调整间隔 |
+| 企业微信 | 扫码登录、自动发现应用（含 AgentId 与控制台应用编号）、配置可信 IP 写入模板 |
 | iKuai | 连接配置、测试并读取公网 IP、探测原始响应 |
 | 同步日志 | 最近 100 次同步记录，可展开查看每个应用的成功/失败与原因 |
 | 账号 | 显示当前管理员、修改密码、忘记密码的找回说明 |
@@ -226,9 +217,6 @@ docker compose down                             # 停止（数据保留在 DATA_
 docker exec -it wecom-trusted-ip python -m app.cli list-admins
 docker exec -it wecom-trusted-ip python -m app.cli set-password --username admin
 docker exec -it wecom-trusted-ip python -m app.cli reset-admin    # 清空后重开初始化页
-
-# 排查「读取当前可信 IP」：逐条打印请求、原始返回与解析结果（只读，不改配置）
-docker exec -it wecom-trusted-ip python -m app.cli check-trusted-ips
 
 # 备份
 tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
@@ -252,9 +240,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 面板上会看到：
 
 - 仪表盘：当前公网 IP（含来源与观测时间）、自建应用总数、已覆盖数量、最近一次同步状态；
-- 应用表格：`应用名称` / `AgentId` / `当前可信 IP`（企业微信真实读数 + 读取时间）/ `状态` /
-  `最近覆盖 IP` / `覆盖时间` / `最近错误`；状态由真实读数与最新公网 IP 比对得出
-  （`已最新` / `待更新` / `未知` / `失败`）；
+- 应用表格：`应用名称` / `AgentId` / `最近覆盖 IP` / `状态` / `覆盖时间` / `最近错误`；
 - 同步日志：`完成时间 / 公网 IP / 结果 / 说明`，可展开每个应用的明细。
 
 接口返回示例（服务端真实返回；除健康检查与登录外，都需要 `Authorization: Bearer <token>`）：
@@ -266,31 +252,31 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 // POST /api/ikuai/test —— 读取公网 IP
 {"ok": true, "public_ip": "223.5.5.5"}
 
-// POST /api/sync/run —— 同步结果（先读当前可信 IP，只覆盖不一致的应用）
+// POST /api/sync/run —— 同步结果
 {
   "started_at": "2026-10-03T09:03:50.123456Z",
   "finished_at": "2026-10-03T09:03:52.987654Z",
   "public_ip": "223.5.5.5",
   "status": "ok",
-  "message": "核对 2 个应用：已更新 1 个的可信 IP",
+  "message": "已覆盖 2/2 个应用的可信 IP",
   "results": [
     {
       "agent_id": "1230002",
       "name": "示例应用",
       "success": true,
-      "message": "已覆盖为 223.5.5.5（已回读确认）（原值 1.1.1.1）",
+      "message": "已覆盖为 223.5.5.5",
       "updated": true
     },
     {
       "agent_id": "1230003",
       "name": "报表系统",
       "success": true,
-      "message": "当前可信 IP 已是 223.5.5.5，无需覆盖",
-      "updated": false
+      "message": "已覆盖为 223.5.5.5",
+      "updated": true
     }
   ]
 }
-// status 取值：ok（有应用被覆盖）/ unchanged（核对后都已是目标 IP）/ failed（有失败或前置条件缺失）
+// status 取值：ok（有应用被覆盖）/ unchanged（公网 IP 未变化，自动同步跳过）/ failed（有失败或前置条件缺失）
 
 // POST /api/ikuai/probe —— 探测原始响应（凭据已脱敏）
 {
@@ -354,24 +340,24 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 | GET / PUT | `/api/wecom/template` | 可信 IP 写入模板 |
 | POST | `/api/wecom/template/parse` | 解析 cURL 生成写入模板预览 |
 | GET / PUT | `/api/sync/settings` | 自动同步设置 |
-| POST | `/api/sync/run` | 立即同步；`force: true` 只用于绕过"公网 IP 未变化"的本地短路，读到已经一致的应用仍不会重复写入 |
-| POST | `/api/sync/refresh-trusted-ips` | 只读读取所有应用的当前可信 IP（不写入），供面板随时核对 |
+| POST | `/api/sync/run` | 立即同步；`force: true` 表示忽略"公网 IP 未变化"直接重写一遍 |
 | GET | `/api/sync/events` | 同步历史 |
 
 ## 七、已知限制
 
 - **依赖管理后台页面结构**：写入靠重放录制的请求，企业微信改版后需重新录制模板；
-- **"当前可信 IP"依赖后台响应结构**：从「应用管理页」的列表响应里读取；若企业微信改版导致读不出来，
-  面板会显示"未知"并回退为"写入返回成功即成功"，届时需要按新的响应结构适配（用
-  `python -m app.cli check-trusted-ips` 看原始返回）；
-- **登录态会过期**：企业微信登录态不落盘，**每次重启容器都要重新扫码**；
+- **"已覆盖"来自写入结果**：同步不读回企业微信里的真实值，判定依据是写入请求的返回（HTTP 状态 +
+  `errcode`）；若企业微信改版导致返回体不再带 `errcode`，需要按新结构适配；
+- **登录态会被挤下线**：登录态保存在 `DATA_DIR/wecom_state.json` 并会在重启后复用，但在企业微信
+  官网/手机端重新登录会把容器里的会话挤掉；此时同步会明确报"登录态已失效"，重新扫码即可；
 - **同一账号单会话**：在企业微信官网/手机端重新扫码登录，会把容器里的会话挤下线。此时同步会明确
   报"登录态已失效，请重新扫码登录"（不会静默成功），在面板「企业微信」页重新扫码即可恢复；
 - **需要后台权限**：扫码的账号必须能修改自建应用的可信 IP；
 - **公网 IP 来源**：iKuai 解析失败会回退外部回显服务，只有后端与 iKuai 同出口时两者才一致；
 - **无头浏览器风控**：若企业微信对无头浏览器弹安全验证，把 `APP_BROWSER_HEADLESS` 设为 `false`
   并在有图形界面的环境运行；
-- **镜像较大**：解压后 3.73 GB（Playwright 基础镜像自带 Chromium 及系统依赖），下载约 1.0 GB；
+- **镜像体积**：已从 Playwright 官方镜像（解压 3.73 GB）换成 `python:3.12-slim` + 仅 Chromium，
+  体积明显变小，具体数值以构建结果为准；
 - **面板账号与企业微信登录互不影响**：改面板密码不影响扫码，反之亦然。
 
 ## 八、安全说明

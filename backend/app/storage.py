@@ -38,8 +38,6 @@ CREATE TABLE IF NOT EXISTS wecom_apps (
     console_app_id TEXT,
     last_synced_ip TEXT,
     last_synced_at TEXT,
-    current_trusted_ips TEXT,
-    trusted_ip_checked_at TEXT,
     last_error TEXT
 );
 CREATE TABLE IF NOT EXISTS public_ip_observations (
@@ -180,13 +178,12 @@ class AppStorage:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT agent_id, name, console_app_id, last_synced_ip, last_synced_at,
-                       current_trusted_ips, trusted_ip_checked_at, last_error
+                SELECT agent_id, name, console_app_id, last_synced_ip, last_synced_at, last_error
                 FROM wecom_apps
                 ORDER BY agent_id
                 """
             ).fetchall()
-        return [WeComApp.model_validate(_load_app_row(row)) for row in rows]
+        return [WeComApp.model_validate(dict(row)) for row in rows]
 
     def replace_wecom_apps(self, apps: list[WeComApp]) -> None:
         """用最新发现结果替换应用清单，同时保留已记录的同步状态。"""
@@ -195,12 +192,10 @@ class AppStorage:
             connection.executemany(
                 """
                 INSERT INTO wecom_apps (
-                    agent_id, name, console_app_id, last_synced_ip, last_synced_at,
-                    current_trusted_ips, trusted_ip_checked_at, last_error
+                    agent_id, name, console_app_id, last_synced_ip, last_synced_at, last_error
                 )
                 VALUES (
-                    :agent_id, :name, :console_app_id, :last_synced_ip, :last_synced_at,
-                    :current_trusted_ips, :trusted_ip_checked_at, :last_error
+                    :agent_id, :name, :console_app_id, :last_synced_ip, :last_synced_at, :last_error
                 )
                 """,
                 [self._dump_row(app) for app in apps],
@@ -231,31 +226,6 @@ class AppStorage:
             connection.execute(
                 "UPDATE wecom_apps SET console_app_id = ? WHERE agent_id = ?",
                 (console_app_id, agent_id),
-            )
-
-    def update_app_error(self, agent_id: str, error: str | None) -> None:
-        """只更新某个应用的最近错误，保留覆盖记录与可信 IP 读数。"""
-        with self._write_lock, self._connect() as connection:
-            connection.execute(
-                "UPDATE wecom_apps SET last_error = ? WHERE agent_id = ?",
-                (error, agent_id),
-            )
-
-    def record_app_trusted_ips(
-        self, agent_id: str, *, ips: list[str], checked_at: str
-    ) -> None:
-        """记录从企业微信读到的当前可信 IP 与读取时间。
-
-        读到了就说明这次核对成功，顺带清掉上一次留下的错误。
-        """
-        with self._write_lock, self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE wecom_apps
-                SET current_trusted_ips = ?, trusted_ip_checked_at = ?, last_error = NULL
-                WHERE agent_id = ?
-                """,
-                (json.dumps(ips, ensure_ascii=False), checked_at, agent_id),
             )
 
     def record_public_ip(self, observation: PublicIpObservation) -> None:
@@ -342,14 +312,6 @@ class AppStorage:
             "console_app_id": app.console_app_id,
             "last_synced_ip": app.last_synced_ip,
             "last_synced_at": app.last_synced_at.isoformat() if app.last_synced_at else None,
-            "current_trusted_ips": (
-                None
-                if app.current_trusted_ips is None
-                else json.dumps(app.current_trusted_ips, ensure_ascii=False)
-            ),
-            "trusted_ip_checked_at": (
-                app.trusted_ip_checked_at.isoformat() if app.trusted_ip_checked_at else None
-            ),
             "last_error": app.last_error,
         }
 
@@ -368,27 +330,8 @@ class AppStorage:
 def _migrate_schema(connection: sqlite3.Connection) -> None:
     """补齐旧版本数据库缺失的列，保持升级后无需手工改库。"""
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(wecom_apps)")}
-    added_columns = {
-        "console_app_id": "TEXT",
-        "current_trusted_ips": "TEXT",
-        "trusted_ip_checked_at": "TEXT",
-    }
-    for column, column_type in added_columns.items():
-        if column not in columns:
-            connection.execute(f"ALTER TABLE wecom_apps ADD COLUMN {column} {column_type}")
-
-
-def _load_app_row(row: sqlite3.Row) -> dict:
-    """把数据行转成模型输入，顺带还原以 JSON 存储的可信 IP 列表。"""
-    payload = dict(row)
-    stored_ips = payload.get("current_trusted_ips")
-    if isinstance(stored_ips, str):
-        try:
-            restored = json.loads(stored_ips)
-        except ValueError:
-            restored = None
-        payload["current_trusted_ips"] = restored if isinstance(restored, list) else None
-    return payload
+    if "console_app_id" not in columns:
+        connection.execute("ALTER TABLE wecom_apps ADD COLUMN console_app_id TEXT")
 
 
 def _utc_now_iso() -> str:
