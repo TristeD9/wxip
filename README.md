@@ -228,6 +228,9 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins
 docker exec -it wecom-trusted-ip python -m app.cli set-password --username admin
 docker exec -it wecom-trusted-ip python -m app.cli reset-admin    # 清空后重开初始化页
 
+# 排查「读取当前可信 IP」：逐条打印请求、原始返回与解析结果（只读，不改配置）
+docker exec -it wecom-trusted-ip python -m app.cli check-trusted-ips
+
 # 备份
 tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 ```

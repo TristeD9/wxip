@@ -5,17 +5,21 @@
     python -m app.cli list-admins
     python -m app.cli set-password --username admin
     python -m app.cli reset-admin
+    python -m app.cli check-trusted-ips
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import sys
 
 from app.config import Settings
 from app.passwords import check_password_strength, hash_password
 from app.storage import AppStorage
+from app.wecom.admin_browser import WeComAdminError, WeComAdminSession
+from app.wecom.parsing import extract_trusted_ips
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         "reset-admin", help="删除管理员账号，下次打开面板重新创建"
     )
     reset_admin.add_argument("--username", default=None, help="只删除指定用户；省略时全部删除")
+
+    subparsers.add_parser(
+        "check-trusted-ips", help="只读读取各应用当前可信 IP，逐条打印原始返回与解析结果"
+    )
     return parser
 
 
@@ -51,6 +59,8 @@ def main(argv: list[str] | None = None, settings: Settings | None = None) -> int
         return _set_password(storage, args.username, args.password)
     if args.command == "reset-admin":
         return _reset_admin(storage, args.username)
+    if args.command == "check-trusted-ips":
+        return _check_trusted_ips(app_settings, storage)
     return 1
 
 
@@ -90,6 +100,55 @@ def _reset_admin(storage: AppStorage, username: str | None) -> int:
         print("已清空全部管理员账号。")
     print("下次打开面板会进入「创建管理员账号」页面。")
     return 0
+
+
+def _check_trusted_ips(settings: Settings, storage: AppStorage) -> int:
+    """只读复现一次"读取当前可信 IP"，把每一步细节打到终端，便于排查读取失败。"""
+    return asyncio.run(_check_trusted_ips_async(settings, storage))
+
+
+async def _check_trusted_ips_async(settings: Settings, storage: AppStorage) -> int:
+    template = storage.get_read_template()
+    apps = storage.list_wecom_apps()
+    print(f"读取模板：{'已配置' if template else '未配置'}")
+    if template is not None:
+        print(f"  {template.method} {template.url}")
+        print(f"  请求体：{template.body or '-'}")
+    print(f"应用数量：{len(apps)}")
+    if template is None or not apps:
+        print("缺少读取模板或应用清单，请先到面板「企业微信」页补齐。")
+        return 1
+
+    observation = storage.latest_public_ip()
+    public_ip = observation.ip if observation else ""
+    session = WeComAdminSession(
+        state_path=settings.wecom_state_path,
+        headless=settings.browser_headless,
+        channel=settings.browser_channel,
+        timeout_ms=settings.browser_timeout_ms,
+        apps_url_provider=storage.get_wecom_apps_url,
+    )
+    failed = 0
+    try:
+        for app in apps:
+            print(f"\n[{app.agent_id}] {app.name}｜控制台编号：{app.console_app_id or '未填'}")
+            try:
+                raw = await session.replay_request(
+                    template, agent_id=app.agent_id, app_id=app.console_app_id or "", ip=public_ip
+                )
+            except WeComAdminError as error:
+                print(f"  请求失败：{error}")
+                failed += 1
+                continue
+            parsed = extract_trusted_ips(raw)
+            print(f"  原始返回：{raw[:400]}")
+            print(f"  解析结果：{parsed}")
+            if parsed is None:
+                failed += 1
+    finally:
+        await session.close()
+    print(f"\n完成：{len(apps) - failed}/{len(apps)} 个应用读取成功（请求失败或解析不出都算失败）。")
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

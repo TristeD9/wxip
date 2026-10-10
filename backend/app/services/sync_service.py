@@ -209,16 +209,21 @@ class SyncService:
         """读取应用当前可信 IP，返回 (IP 列表, 错误说明)，两者最多一个非空。"""
         blocker = self._check_required_app_id(app, read_template)
         if blocker is not None:
+            self._storage.update_app_error(app.agent_id, blocker)
             return None, blocker
         try:
             trusted_ips = await self._wecom_session.read_trusted_ips(
                 read_template, agent_id=app.agent_id, app_id=app.console_app_id or "", ip=ip
             )
         except WeComAdminError as error:
-            logger.warning("应用 %s 读取当前可信 IP 失败：%s", app.agent_id, error)
-            return None, str(error)
+            message = str(error)
+            logger.warning("应用 %s 读取当前可信 IP 失败：%s", app.agent_id, message)
+            self._storage.update_app_error(app.agent_id, message)
+            return None, message
         if trusted_ips is None:
-            return None, "响应里没有可识别的可信 IP 列表"
+            message = "响应里没有可识别的可信 IP 列表"
+            self._storage.update_app_error(app.agent_id, message)
+            return None, message
         self._storage.record_app_trusted_ips(
             app.agent_id, ips=trusted_ips, checked_at=_utc_now().isoformat()
         )

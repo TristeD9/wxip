@@ -243,6 +243,14 @@ class AppStorage:
                 (console_app_id, agent_id),
             )
 
+    def update_app_error(self, agent_id: str, error: str | None) -> None:
+        """只更新某个应用的最近错误，保留覆盖记录与可信 IP 读数。"""
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE wecom_apps SET last_error = ? WHERE agent_id = ?",
+                (error, agent_id),
+            )
+
     def record_app_trusted_ips(
         self, agent_id: str, *, ips: list[str], checked_at: str
     ) -> None:

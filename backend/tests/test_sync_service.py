@@ -500,3 +500,16 @@ async def test_refresh_trusted_ips_counts_unreadable_apps(storage):
     assert "0/1" in summary.message
     assert "1 个读取失败" in summary.message
 
+
+async def test_refresh_trusted_ips_records_reason_on_app(storage):
+    """读取失败的原因要落到应用上，否则面板里只看到"失败"不知道原因。"""
+    prepare_storage(storage)
+    prepare_read_template(storage)
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(), wecom_session=FakeWeComSession()
+    )
+
+    await service.refresh_trusted_ips()
+
+    assert storage.list_wecom_apps()[0].last_error == "响应里没有可识别的可信 IP 列表"
+

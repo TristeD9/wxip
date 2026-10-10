@@ -221,7 +221,8 @@ class WeComAdminSession:
         """读取该应用当前的可信 IP；解析不出来时返回 None 并把原始响应留档。"""
         text = await self.replay_request(template, agent_id=agent_id, app_id=app_id, ip=ip)
         trusted_ips = extract_trusted_ips(text)
-        if trusted_ips is None:
+        if not trusted_ips:
+            # 读不出来、或读成空列表时都留档：空列表很可能是字段名挑错了
             await self._dump_read_debug(agent_id=agent_id, response_text=text)
         return trusted_ips
 

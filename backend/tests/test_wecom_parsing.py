@@ -242,6 +242,34 @@ def test_extract_trusted_ips_returns_empty_list_when_backend_has_none():
     assert extract_trusted_ips('{"data":{"trusted_ip_list":[]}}') == []
 
 
+def test_extract_trusted_ips_reads_service_ip_info_list():
+    """真实后台返回里企业可信IP 放在 service_ip_info_list。"""
+    body = (
+        '{"data":{"servicecorp_ip_list":[],"invalid_ip_list":[],'
+        '"service_ip_info_list":["203.0.113.10"]}}'
+    )
+
+    assert extract_trusted_ips(body) == ["203.0.113.10"]
+
+
+def test_extract_trusted_ips_reads_object_entries():
+    body = (
+        '{"data":{"service_ip_info_list":['
+        '{"ip":"203.0.113.10","status":1},{"ip":"203.0.113.11","status":0}]}}'
+    )
+
+    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
+
+
+def test_extract_trusted_ips_returns_empty_for_empty_known_field():
+    body = (
+        '{"data":{"servicecorp_ip_list":[],"invalid_ip_list":[],'
+        '"service_ip_info_list":[]}}'
+    )
+
+    assert extract_trusted_ips(body) == []
+
+
 def test_extract_trusted_ips_falls_back_to_plain_ip_array():
     body = '{"result":{"items":["203.0.113.10","203.0.113.11"]}}'
 

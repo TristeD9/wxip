@@ -18,8 +18,14 @@ _SELF_BUILT_AGENT_OPEN_ID_PATTERN = re.compile(r"^1\d{5,6}$")
 _SELF_BUILT_APP_MARKERS = ("callback_url", "url_token", "callback_aeskey")
 _WECOM_OK_ERRCODE = 0
 _IPV4_PATTERN = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
-# 键名统一小写并去掉下划线后再比较，因此这里都是紧凑写法
-_TRUSTED_IP_KEYS = frozenset({"trustediplist", "trustedips", "trustedip", "iplist"})
+# 键名统一小写并去掉下划线后再比较，因此这里都是紧凑写法。
+# serviceipinfolist 是后台实测返回的「企业可信IP 信息列表」；同一响应里的
+# servicecorp_ip_list 是服务商可信IP，不能拿来当企业可信IP 用。
+_TRUSTED_IP_KEYS = frozenset(
+    {"trustediplist", "trustedips", "trustedip", "iplist", "serviceipinfolist"}
+)
+# 列表元素是对象时，从这些字段里取 IP
+_IP_VALUE_KEYS = ("ip", "ipv4", "ip_address", "address")
 
 
 def describe_wecom_error(body: str) -> str | None:
@@ -58,6 +64,7 @@ def extract_trusted_ips(body: str) -> list[str] | None:
 
     企业微信改版后字段名可能变化，所以先按已知字段名找，找不到再退化为
     "整个数组都是 IPv4"的结构；两者都不成立时返回 ``None`` 表示读不出来。
+    列表元素既可能是 IP 字符串，也可能是 ``{"ip": "...", "status": ...}`` 这样的对象。
 
     Args:
         body: 接口返回的响应体文本。
@@ -97,7 +104,11 @@ def _normalize_ip_values(value: object) -> list[str] | None:
     if isinstance(value, str):
         candidates = [part for part in re.split(r"[\s,;]+", value) if part]
     elif isinstance(value, list):
-        candidates = [str(item) for item in value]
+        if not value:
+            return []
+        candidates = [ip for item in value for ip in _values_to_ips(item)]
+        if not candidates:
+            return None
     else:
         return None
     ips = [candidate for candidate in candidates if _IPV4_PATTERN.match(candidate)]
@@ -106,10 +117,27 @@ def _normalize_ip_values(value: object) -> list[str] | None:
     return list(dict.fromkeys(ips))
 
 
+def _values_to_ips(item: object) -> list[str]:
+    """从列表元素里取 IP：元素是字符串就直接用，是对象就找 ``ip`` 之类的字段。"""
+    if isinstance(item, str):
+        return [item.strip()]
+    if isinstance(item, dict):
+        for key in _IP_VALUE_KEYS:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return [value.strip()]
+    return []
+
+
 def _find_ip_list(payload: object) -> list[str] | None:
-    """兜底策略：找第一个"元素全是 IPv4 字符串"的数组。"""
+    """兜底策略：找第一个"每个元素都能取出一个 IPv4"的数组。"""
     if isinstance(payload, list):
-        ips = [item for item in payload if isinstance(item, str) and _IPV4_PATTERN.match(item)]
+        ips = [
+            ip
+            for item in payload
+            for ip in _values_to_ips(item)
+            if _IPV4_PATTERN.match(ip)
+        ]
         if ips and len(ips) == len(payload):
             return list(dict.fromkeys(ips))
         for item in payload:
