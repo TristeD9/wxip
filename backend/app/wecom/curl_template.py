@@ -111,21 +111,6 @@ def validate_request_template(template: RequestTemplate) -> list[str]:
     return warnings
 
 
-def validate_read_template(template: RequestTemplate) -> list[str]:
-    """校验查询可信 IP 的模板能否逐个应用读取。
-
-    Raises:
-        CurlParseError: 模板里没有任何应用编号占位符，那样每个应用都会读到同一份配置。
-    """
-    haystack = _template_haystack(template)
-    if AGENT_ID_PLACEHOLDER not in haystack and APP_ID_PLACEHOLDER not in haystack:
-        raise CurlParseError(
-            f"读取请求里没有 {AGENT_ID_PLACEHOLDER} 或 {APP_ID_PLACEHOLDER} 占位符，"
-            "无法逐个应用读取当前可信 IP"
-        )
-    return []
-
-
 def required_placeholders(template: RequestTemplate) -> set[str]:
     """返回模板里实际用到的编号占位符，供同步前检查应用是否有对应编号。"""
     haystack = _template_haystack(template)

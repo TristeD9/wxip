@@ -110,7 +110,6 @@ async def _check_trusted_ips_async(settings: Settings, storage: AppStorage) -> i
     apps = storage.list_wecom_apps()
     print(f"应用清单：{len(apps)} 个")
     print(f"写入模板：{'已配置' if storage.get_request_template() else '未配置'}")
-    print(f"备用读取模板：{'已配置' if storage.get_read_template() else '未配置（不影响读取）'}")
     if not apps:
         print("没有应用清单，请先到面板「企业微信」页自动发现或手工导入。")
         return 1

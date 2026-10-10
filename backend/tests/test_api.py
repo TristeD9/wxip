@@ -178,34 +178,6 @@ def test_template_save_rejects_missing_ip_placeholder(client):
     assert "{ip}" in response.json()["detail"]
 
 
-def test_read_template_parse_and_save(client):
-    curl = (
-        "curl 'https://work.weixin.qq.com/wework_admin/apps/getIpConfig"
-        "?app_id=5629500000000001&f=json' -H 'accept: application/json'"
-    )
-
-    parse_response = client.post("/api/wecom/read-template/parse", json={"curl": curl})
-
-    assert parse_response.status_code == 200
-    template = parse_response.json()["template"]
-    assert "{app_id}" in template["url"]
-
-    save_response = client.put("/api/wecom/read-template", json=template)
-    assert save_response.status_code == 200
-
-    assert client.get("/api/wecom/read-template").json()["configured"] is True
-    assert client.get("/api/wecom/template").json()["configured"] is False
-
-
-def test_read_template_save_rejects_missing_app_placeholder(client):
-    invalid = RequestTemplate(method="GET", url="https://example.com/app/info")
-
-    response = client.put("/api/wecom/read-template", json=invalid.model_dump())
-
-    assert response.status_code == 400
-    assert "无法逐个应用读取" in response.json()["detail"]
-
-
 def test_refresh_trusted_ips_returns_updated_apps(client):
     client.put("/api/wecom/apps/manual", json={"text": "1230006,客服系统"})
 

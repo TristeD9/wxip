@@ -77,8 +77,5 @@ class SyncScheduler:
         )
 
     def _can_refresh(self) -> bool:
-        """只读核对不需要 iKuai，只要有读取模板和应用清单。"""
-        return (
-            self._storage.get_read_template() is not None
-            and bool(self._storage.list_wecom_apps())
-        )
+        """只读核对不需要 iKuai 与写入模板，有应用清单就能读。"""
+        return bool(self._storage.list_wecom_apps())

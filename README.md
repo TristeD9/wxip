@@ -191,9 +191,9 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
    模板里必须出现 `{ip}`（要写入的公网 IP）和 `{app_id}` 或 `{agent_id}`（应用编号），
    缺少 `{ip}` 时面板会直接拒绝保存。
 
-6. **当前可信 IP 的读取不用配置**：同步时会打开「应用管理页」，从后台自己发出的应用列表响应里
-   读出每个应用当前的可信 IP（含写入后的回读校验）。只有默认读取失败时，才需要在面板
-   「企业微信」页的**「备用读取模板（可选）」**区块里录一个查询请求兜底。
+6. **当前可信 IP 不用配置**：同步时会打开「应用管理页」，从后台自己发出的应用列表响应里读出每个
+   应用当前的可信 IP，写入后再回读一次确认。读取失败时用
+   `python -m app.cli check-trusted-ips` 排查即可。
 
 ### 4.2 日常使用
 
@@ -353,8 +353,6 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 | GET / PUT | `/api/wecom/apps-url` | 应用管理页地址（后台改版时调整） |
 | GET / PUT | `/api/wecom/template` | 可信 IP 写入模板 |
 | POST | `/api/wecom/template/parse` | 解析 cURL 生成写入模板预览 |
-| GET / PUT | `/api/wecom/read-template` | 备用读取模板（默认读取失败时才需要） |
-| POST | `/api/wecom/read-template/parse` | 解析 cURL 生成备用读取模板预览 |
 | GET / PUT | `/api/sync/settings` | 自动同步设置 |
 | POST | `/api/sync/run` | 立即同步；`force: true` 只用于绕过"公网 IP 未变化"的本地短路，读到已经一致的应用仍不会重复写入 |
 | POST | `/api/sync/refresh-trusted-ips` | 只读读取所有应用的当前可信 IP（不写入），供面板随时核对 |
@@ -363,8 +361,9 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 ## 七、已知限制
 
 - **依赖管理后台页面结构**：写入靠重放录制的请求，企业微信改版后需重新录制模板；
-- **"当前可信 IP"依赖后台响应结构**：默认从「应用管理页」的列表响应里读取；若企业微信改版导致
-  读不出来，面板会显示"未知"，备份方案是在「企业微信」页录一个「备用读取模板」；
+- **"当前可信 IP"依赖后台响应结构**：从「应用管理页」的列表响应里读取；若企业微信改版导致读不出来，
+  面板会显示"未知"并回退为"写入返回成功即成功"，届时需要按新的响应结构适配（用
+  `python -m app.cli check-trusted-ips` 看原始返回）；
 - **登录态会过期**：企业微信登录态不落盘，**每次重启容器都要重新扫码**；
 - **同一账号单会话**：在企业微信官网/手机端重新扫码登录，会把容器里的会话挤下线。此时同步会明确
   报"登录态已失效，请重新扫码登录"（不会静默成功），在面板「企业微信」页重新扫码即可恢复；

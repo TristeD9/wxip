@@ -41,10 +41,6 @@ class WeComSessionProtocol(Protocol):
 
     async def read_app_trusted_ips(self) -> dict[str, list[str]]: ...
 
-    async def read_trusted_ips(
-        self, template: RequestTemplate, *, agent_id: str, app_id: str, ip: str
-    ) -> list[str] | None: ...
-
     async def replay_request(
         self, template: RequestTemplate, *, agent_id: str, app_id: str, ip: str
     ) -> str: ...
@@ -65,9 +61,11 @@ class SyncService:
         self._wecom_session = wecom_session
 
     async def sync(self, *, force: bool = False) -> SyncSummary:
-        """核对所有自建应用的当前可信 IP，只覆盖不一致的，并回读确认。"""
+        """核对所有自建应用的当前可信 IP，只覆盖不一致的，并回读确认。
+
+        ``force`` 为真时忽略读到的当前值，直接重写一遍（真正的强制覆盖）。
+        """
         started_at = _utc_now()
-        previous = self._storage.latest_public_ip()
 
         try:
             observation = await self._resolver.resolve(self._storage.get_ikuai_settings())
@@ -75,21 +73,6 @@ class SyncService:
             return self._fail(started_at, public_ip=None, message=str(error))
 
         self._storage.record_public_ip(observation)
-        read_template = self._storage.get_read_template()
-        # 能读到真实状态时就不再用本地记录决定跳过
-        if (
-            read_template is None
-            and not self._can_read_current_ips()
-            and not force
-            and self._is_already_synced(observation, previous)
-        ):
-            return self._finish(
-                started_at,
-                public_ip=observation.ip,
-                status=SYNC_STATUS_UNCHANGED,
-                message="公网 IP 未变化，自动同步已跳过；需要重新写入请在面板点「立即同步」",
-            )
-
         template = self._storage.get_request_template()
         if template is None:
             return self._fail(started_at, observation.ip, "尚未录制可信 IP 请求模板")
@@ -102,18 +85,16 @@ class SyncService:
         except WeComAdminError as error:
             return self._fail(started_at, observation.ip, str(error))
 
-        current_ips_by_agent = await self._collect_current_trusted_ips(
-            apps, read_template, observation.ip
-        )
+        current_ips_by_agent = await self._read_app_trusted_ips(apps)
         results = [
             await self._sync_one_app(
-                app, template, current_ips_by_agent.get(app.agent_id), observation.ip
+                app, template, current_ips_by_agent.get(app.agent_id), observation.ip, force
             )
             for app in apps
         ]
         if any(result.updated for result in results):
             results = await self._verify_written_apps(
-                apps, results, current_ips_by_agent, read_template, observation.ip
+                apps, results, current_ips_by_agent, observation.ip
             )
         return self._summarize(started_at, public_ip=observation.ip, results=results)
 
@@ -128,11 +109,7 @@ class SyncService:
             raise WeComAdminError("尚未发现任何企业微信自建应用")
         await self._wecom_session.ensure_logged_in()
 
-        observation = self._storage.latest_public_ip()
-        ip_for_template = observation.ip if observation else ""
-        collected = await self._collect_current_trusted_ips(
-            apps, self._storage.get_read_template(), ip_for_template
-        )
+        collected = await self._read_app_trusted_ips(apps)
         failed = len(apps) - len(collected)
         suffix = f"，{failed} 个读取失败" if failed else ""
         return TrustedIpCheckSummary(
@@ -142,20 +119,17 @@ class SyncService:
             message=f"已读取 {len(collected)}/{len(apps)} 个应用的当前可信 IP{suffix}",
         )
 
-    async def _collect_current_trusted_ips(
-        self, apps: list[WeComApp], read_template: RequestTemplate | None, ip: str
-    ) -> dict[str, list[str]]:
-        """返回 ``{agent_id: [当前可信 IP]}``，读不到的应用不出现在字典里。
+    async def _read_app_trusted_ips(self, apps: list[WeComApp]) -> dict[str, list[str]]:
+        """打开应用管理页，读出每个应用当前的可信 IP。
 
-        优先用应用管理页的列表响应一次读全部（后台本来就会返回所有应用配置），读不到
-        再退回逐个应用重放「读取可信 IP 模板」。
+        返回 ``{agent_id: [当前可信 IP]}``；读不到的应用不出现在字典里。
         """
-        collected: dict[str, list[str]] = {}
         try:
             listed = await self._wecom_session.read_app_trusted_ips()
         except WeComAdminError as error:
             logger.warning("从应用列表读取当前可信 IP 失败：%s", error)
-            listed = {}
+            return {}
+        collected: dict[str, list[str]] = {}
         checked_at = _utc_now().isoformat()
         for app in apps:
             if app.agent_id not in listed:
@@ -164,15 +138,6 @@ class SyncService:
                 app.agent_id, ips=listed[app.agent_id], checked_at=checked_at
             )
             collected[app.agent_id] = listed[app.agent_id]
-
-        if read_template is None:
-            return collected
-        for app in apps:
-            if app.agent_id in collected:
-                continue
-            trusted_ips, _ = await self._read_current_trusted_ips(app, read_template, ip)
-            if trusted_ips is not None:
-                collected[app.agent_id] = trusted_ips
         return collected
 
     async def _sync_one_app(
@@ -181,6 +146,7 @@ class SyncService:
         template: RequestTemplate,
         current_ips: list[str] | None,
         ip: str,
+        force: bool,
     ) -> SyncAppResult:
         """按已读到的当前值决定跳过还是写入，返回写入阶段的结果。"""
         missing_id_message = self._check_required_app_id(app, template)
@@ -192,7 +158,7 @@ class SyncService:
                 agent_id=app.agent_id, name=app.name, success=False, message=missing_id_message
             )
 
-        if current_ips == [ip]:
+        if not force and current_ips == [ip]:
             return SyncAppResult(
                 agent_id=app.agent_id,
                 name=app.name,
@@ -225,11 +191,10 @@ class SyncService:
         apps: list[WeComApp],
         results: list[SyncAppResult],
         previous_ips_by_agent: dict[str, list[str]],
-        read_template: RequestTemplate | None,
         ip: str,
     ) -> list[SyncAppResult]:
         """写过之后再统一读一次，确认这些应用现在真的是目标 IP。"""
-        confirmed = await self._collect_current_trusted_ips(apps, read_template, ip)
+        confirmed = await self._read_app_trusted_ips(apps)
         verified_results: list[SyncAppResult] = []
         for app, result in zip(apps, results):
             if not result.updated or not result.success:
@@ -284,32 +249,6 @@ class SyncService:
             updated=True,
         )
 
-    async def _read_current_trusted_ips(
-        self, app: WeComApp, read_template: RequestTemplate, ip: str
-    ) -> tuple[list[str] | None, str | None]:
-        """逐个应用重放读取模板，返回 (IP 列表, 错误说明)，两者最多一个非空。"""
-        blocker = self._check_required_app_id(app, read_template)
-        if blocker is not None:
-            self._storage.update_app_error(app.agent_id, blocker)
-            return None, blocker
-        try:
-            trusted_ips = await self._wecom_session.read_trusted_ips(
-                read_template, agent_id=app.agent_id, app_id=app.console_app_id or "", ip=ip
-            )
-        except WeComAdminError as error:
-            message = str(error)
-            logger.warning("应用 %s 读取当前可信 IP 失败：%s", app.agent_id, message)
-            self._storage.update_app_error(app.agent_id, message)
-            return None, message
-        if trusted_ips is None:
-            message = "响应里没有可识别的可信 IP 列表"
-            self._storage.update_app_error(app.agent_id, message)
-            return None, message
-        self._storage.record_app_trusted_ips(
-            app.agent_id, ips=trusted_ips, checked_at=_utc_now().isoformat()
-        )
-        return trusted_ips, None
-
     def _summarize(
         self, started_at: datetime, *, public_ip: str, results: list[SyncAppResult]
     ) -> SyncSummary:
@@ -333,10 +272,6 @@ class SyncService:
             results=results,
         )
 
-    def _can_read_current_ips(self) -> bool:
-        """能不能读到真实状态：只要有应用清单就够（列表接口本身带可信 IP）。"""
-        return bool(self._storage.list_wecom_apps())
-
     @staticmethod
     def _check_required_app_id(app: WeComApp, template: RequestTemplate) -> str | None:
         """模板要求管理后台应用编号、但该应用没记录时，提前给出可读原因。"""
@@ -346,16 +281,6 @@ class SyncService:
                 "请在「企业微信」页用「agentid,应用名,控制台应用编号」手工补录"
             )
         return None
-
-    def _is_already_synced(
-        self, observation: PublicIpObservation, previous: PublicIpObservation | None
-    ) -> bool:
-        if previous is None or previous.ip != observation.ip:
-            return False
-        apps = self._storage.list_wecom_apps()
-        if not apps:
-            return False
-        return all(app.last_synced_ip == observation.ip and not app.last_error for app in apps)
 
     def _fail(self, started_at: datetime, public_ip: str | None, message: str) -> SyncSummary:
         logger.error("可信 IP 同步失败：%s", message)

@@ -22,7 +22,6 @@ from app.models import (
 
 SETTING_IKUAI = "ikuai_settings"
 SETTING_TEMPLATE = "wecom_request_template"
-SETTING_READ_TEMPLATE = "wecom_read_template"
 SETTING_SYNC = "sync_settings"
 SETTING_WECOM_APPS_URL = "wecom_apps_url"
 
@@ -98,15 +97,6 @@ class AppStorage:
     def save_request_template(self, template: RequestTemplate) -> None:
         """覆盖保存请求模板。"""
         self._set_json(SETTING_TEMPLATE, template.model_dump())
-
-    def get_read_template(self) -> RequestTemplate | None:
-        """读取"查询当前可信 IP"的请求模板，未录制时返回 None。"""
-        stored = self._get_json(SETTING_READ_TEMPLATE)
-        return RequestTemplate.model_validate(stored) if stored else None
-
-    def save_read_template(self, template: RequestTemplate) -> None:
-        """覆盖保存查询可信 IP 的请求模板。"""
-        self._set_json(SETTING_READ_TEMPLATE, template.model_dump())
 
     def get_wecom_apps_url(self) -> str:
         """读取企业微信应用管理页地址，用于适配后台改版。"""

@@ -33,9 +33,6 @@ def prepare_ready_storage(storage: AppStorage) -> None:
     storage.save_request_template(
         RequestTemplate(method="POST", url="https://example.com/save", body="{ip}")
     )
-    storage.save_read_template(
-        RequestTemplate(method="GET", url="https://example.com/app/{agent_id}")
-    )
     storage.replace_wecom_apps([WeComApp(agent_id="1230002", name="客服系统")])
 
 
@@ -67,10 +64,7 @@ async def test_run_once_only_refreshes_when_auto_disabled(storage):
 
 
 async def test_run_once_refreshes_when_sync_is_not_ready(storage):
-    """没配 iKuai 时写不了，但读取模板齐全就仍然只读核对。"""
-    storage.save_read_template(
-        RequestTemplate(method="GET", url="https://example.com/app/{agent_id}")
-    )
+    """没配 iKuai 与写入模板时写不了，但只要有应用清单就仍然只读核对。"""
     storage.replace_wecom_apps([WeComApp(agent_id="1230002", name="客服系统")])
     storage.save_sync_settings(SyncSettings(auto_enabled=True, interval_seconds=60))
     sync_service = FakeSyncService()
@@ -80,8 +74,7 @@ async def test_run_once_refreshes_when_sync_is_not_ready(storage):
     assert (sync_service.sync_calls, sync_service.refresh_calls) == (0, 1)
 
 
-async def test_run_once_skips_without_read_template(storage):
-    storage.replace_wecom_apps([WeComApp(agent_id="1230002", name="客服系统")])
+async def test_run_once_skips_without_apps(storage):
     storage.save_sync_settings(SyncSettings(auto_enabled=False, interval_seconds=60))
     sync_service = FakeSyncService()
 

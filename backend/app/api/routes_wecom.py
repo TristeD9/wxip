@@ -13,7 +13,6 @@ from app.wecom.curl_template import (
     CurlParseError,
     mask_header_values,
     parse_curl_command,
-    validate_read_template,
     validate_request_template,
 )
 from app.wecom.parsing import merge_app_states, parse_manual_app_list
@@ -131,10 +130,10 @@ async def save_apps_url(
 
 
 @router.get("/template")
-async def read_template(
+async def read_request_template(
     storage: AppStorage = Depends(get_storage), _session: str = Depends(require_session)
 ) -> dict[str, object]:
-    """返回已保存的请求模板。"""
+    """返回已保存的可信 IP 写入模板。"""
     template = storage.get_request_template()
     if template is None:
         return {"configured": False}
@@ -169,48 +168,6 @@ async def save_template(
     except CurlParseError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     storage.save_request_template(payload)
-    return {**_describe_template(payload), "warnings": warnings}
-
-
-@router.get("/read-template")
-async def read_read_template(
-    storage: AppStorage = Depends(get_storage), _session: str = Depends(require_session)
-) -> dict[str, object]:
-    """返回"查询当前可信 IP"的请求模板。"""
-    template = storage.get_read_template()
-    if template is None:
-        return {"configured": False}
-    return _describe_template(template)
-
-
-@router.post("/read-template/parse")
-async def parse_read_template(
-    payload: CurlPayload,
-    storage: AppStorage = Depends(get_storage),
-    _session: str = Depends(require_session),
-) -> dict[str, object]:
-    """解析查询可信 IP 的 cURL，返回模板预览，不会保存。"""
-    known_agent_ids = [app.agent_id for app in storage.list_wecom_apps()]
-    try:
-        template = parse_curl_command(payload.curl, known_agent_ids=known_agent_ids)
-        warnings = validate_read_template(template)
-    except CurlParseError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    return {"template": template.model_dump(), "warnings": warnings, "configured": True}
-
-
-@router.put("/read-template")
-async def save_read_template(
-    payload: RequestTemplate,
-    storage: AppStorage = Depends(get_storage),
-    _session: str = Depends(require_session),
-) -> dict[str, object]:
-    """保存查询可信 IP 的请求模板。"""
-    try:
-        warnings = validate_read_template(payload)
-    except CurlParseError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    storage.save_read_template(payload)
     return {**_describe_template(payload), "warnings": warnings}
 
 

@@ -37,18 +37,15 @@ class FakeWeComSession:
         logged_in: bool = True,
         failure_message: str = "企业微信返回 HTTP 500",
         trusted_ips_by_agent: dict[str, list[str]] | None = None,
-        template_trusted_ips_by_agent: dict[str, list[str]] | None = None,
         listing_error_message: str | None = None,
         writes_take_effect: bool = True,
     ) -> None:
         self.calls: list[tuple[str, str, str]] = []
-        self.reads: list[str] = []
         self.listing_reads = 0
         self.failing_agent_ids = failing_agent_ids or set()
         self.logged_in = logged_in
         self.failure_message = failure_message
         self.trusted_ips_by_agent = trusted_ips_by_agent or {}
-        self.template_trusted_ips_by_agent = template_trusted_ips_by_agent or {}
         self.listing_error_message = listing_error_message
         self.writes_take_effect = writes_take_effect
 
@@ -63,9 +60,8 @@ class FakeWeComSession:
         if agent_id in self.failing_agent_ids:
             raise WeComAdminError(self.failure_message)
         if self.writes_take_effect:
-            # 模拟后台真的写进去了：之后两种读取都能看到新值
+            # 模拟后台真的写进去了：之后读取会看到新值
             self.trusted_ips_by_agent[agent_id] = [ip]
-            self.template_trusted_ips_by_agent[agent_id] = [ip]
         return '{"errcode":0}'
 
     async def read_app_trusted_ips(self) -> dict[str, list[str]]:
@@ -73,12 +69,6 @@ class FakeWeComSession:
         if self.listing_error_message is not None:
             raise WeComAdminError(self.listing_error_message)
         return {agent_id: list(ips) for agent_id, ips in self.trusted_ips_by_agent.items()}
-
-    async def read_trusted_ips(
-        self, template: RequestTemplate, *, agent_id: str, app_id: str, ip: str
-    ) -> list[str] | None:
-        self.reads.append(agent_id)
-        return self.template_trusted_ips_by_agent.get(agent_id)
 
 
 @pytest.fixture
@@ -94,12 +84,6 @@ def prepare_storage(storage, apps=None):
         RequestTemplate(method="POST", url="https://example.com/{agent_id}", body='["{ip}"]')
     )
     storage.replace_wecom_apps(apps or [WeComApp(agent_id="1230002", name="客服系统")])
-
-
-def prepare_read_template(storage) -> None:
-    storage.save_read_template(
-        RequestTemplate(method="GET", url="https://example.com/app/{agent_id}/trusted-ip")
-    )
 
 
 async def test_sync_overwrites_all_apps_with_latest_ip(storage):
@@ -161,8 +145,8 @@ async def test_sync_retries_apps_whose_previous_attempt_failed(storage):
     assert storage.list_wecom_apps()[0].last_error is None
 
 
-async def test_sync_force_still_skips_apps_that_are_already_correct(storage):
-    """force 只用于绕过本地记录短路，读到已经一致就不重复写入。"""
+async def test_sync_force_rewrites_even_when_current_ip_matches(storage):
+    """force 是真正的强制覆盖：读到已经一致也重写一遍。"""
     prepare_storage(storage)
     wecom_session = FakeWeComSession()
     service = SyncService(storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_session)
@@ -170,8 +154,9 @@ async def test_sync_force_still_skips_apps_that_are_already_correct(storage):
 
     forced = await service.sync(force=True)
 
-    assert forced.status == "unchanged"
-    assert len(wecom_session.calls) == 1
+    assert forced.status == "ok"
+    assert len(wecom_session.calls) == 2
+    assert "已回读确认" in forced.results[0].message
 
 
 async def test_sync_fails_when_template_missing(storage):
@@ -424,25 +409,6 @@ async def test_sync_fails_when_read_back_still_shows_old_ip(storage):
     assert stored_app.current_trusted_ips == ["1.1.1.1"]
 
 
-async def test_sync_falls_back_to_read_template_for_missing_app(storage):
-    """列表接口没覆盖到的应用，退回逐个应用的读取模板。"""
-    prepare_storage(storage)
-    prepare_read_template(storage)
-    wecom_service = FakeWeComSession(
-        trusted_ips_by_agent={}, template_trusted_ips_by_agent={"1230002": ["1.1.1.1"]}
-    )
-    service = SyncService(
-        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_service
-    )
-
-    summary = await service.sync()
-
-    assert summary.status == "ok"
-    # 首次从读取模板拿到原值；写入后列表接口已经能读到新值，校验不再走模板
-    assert wecom_service.reads == ["1230002"]
-    assert wecom_service.calls == [("1230002", "", "9.9.9.9")]
-
-
 async def test_refresh_trusted_ips_reads_every_app_without_writing(storage):
     """只读核对：读完刷新本地读数，但不发任何写入请求，也不需要读取模板。"""
     prepare_storage(
@@ -464,7 +430,7 @@ async def test_refresh_trusted_ips_reads_every_app_without_writing(storage):
     assert summary.total == 2
     assert summary.failed == 0
     assert wecom_service.calls == []
-    assert wecom_service.reads == []
+    assert wecom_service.listing_reads == 1
     readings = {app.agent_id: app.current_trusted_ips for app in storage.list_wecom_apps()}
     assert readings == {"1230001": ["1.1.1.1"], "1230002": []}
 
@@ -480,19 +446,6 @@ async def test_refresh_trusted_ips_counts_unreadable_apps(storage):
     assert summary.failed == 1
     assert "0/1" in summary.message
     assert "1 个读取失败" in summary.message
-
-
-async def test_refresh_trusted_ips_records_reason_from_read_template(storage):
-    """退回逐个应用读取仍失败时，原因要落到应用上，面板才能显示。"""
-    prepare_storage(storage)
-    prepare_read_template(storage)
-    service = SyncService(
-        storage=storage, resolver=FakeResolver(), wecom_session=FakeWeComSession()
-    )
-
-    await service.refresh_trusted_ips()
-
-    assert storage.list_wecom_apps()[0].last_error == "响应里没有可识别的可信 IP 列表"
 
 
 async def test_refresh_trusted_ips_fails_without_apps(storage):

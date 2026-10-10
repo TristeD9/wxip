@@ -40,15 +40,6 @@ def test_request_template_round_trip(storage):
     assert storage.get_request_template() == template
 
 
-def test_read_template_round_trip(storage):
-    template = RequestTemplate(method="GET", url="https://example.com/{app_id}/trusted-ip")
-
-    storage.save_read_template(template)
-
-    assert storage.get_read_template() == template
-    assert storage.get_request_template() is None
-
-
 def test_record_app_trusted_ips_round_trip(storage):
     storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
 

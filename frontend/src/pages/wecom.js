@@ -6,14 +6,12 @@ import { icon } from "../icons.js";
 const LOGIN_POLL_INTERVAL_MS = 2000;
 
 export async function renderWeComPage(ctx) {
-  const [state, appsPayload, templatePayload, readTemplatePayload, appsUrlPayload] =
-    await Promise.all([
-      api("/api/state"),
-      api("/api/wecom/apps"),
-      api("/api/wecom/template"),
-      api("/api/wecom/read-template"),
-      api("/api/wecom/apps-url"),
-    ]);
+  const [state, appsPayload, templatePayload, appsUrlPayload] = await Promise.all([
+    api("/api/state"),
+    api("/api/wecom/apps"),
+    api("/api/wecom/template"),
+    api("/api/wecom/apps-url"),
+  ]);
   return [
     loginPanel(state.wecom_login, ctx),
     appsPanel(appsPayload.apps || [], ctx),
@@ -26,18 +24,6 @@ export async function renderWeComPage(ctx) {
       parseUrl: "/api/wecom/template/parse",
       saveUrl: "/api/wecom/template",
       payload: templatePayload,
-      ctx,
-    }),
-    templatePanel({
-      title: "备用读取模板（可选）",
-      subtitle:
-        "当前可信 IP 默认从企业微信「应用管理页」的列表响应里读取，不需要配置任何模板；" +
-        "只有默认读取失败时，才需要在这里录一个查询可信 IP 的请求作为兜底。",
-      curlPlaceholder:
-        "打开任意自建应用的「企业可信IP」，在开发者工具里对返回可信 IP 的请求选择 Copy as cURL，粘贴到这里",
-      parseUrl: "/api/wecom/read-template/parse",
-      saveUrl: "/api/wecom/read-template",
-      payload: readTemplatePayload,
       ctx,
     }),
     appsUrlPanel(appsUrlPayload.url, ctx),
