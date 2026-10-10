@@ -17,6 +17,9 @@ _CONSOLE_APP_ID_PATTERN = re.compile(r"^\d{3,20}$")
 _SELF_BUILT_AGENT_OPEN_ID_PATTERN = re.compile(r"^1\d{5,6}$")
 _SELF_BUILT_APP_MARKERS = ("callback_url", "url_token", "callback_aeskey")
 _WECOM_OK_ERRCODE = 0
+_IPV4_PATTERN = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+# 键名统一小写并去掉下划线后再比较，因此这里都是紧凑写法
+_TRUSTED_IP_KEYS = frozenset({"trustediplist", "trustedips", "trustedip", "iplist"})
 
 
 def describe_wecom_error(body: str) -> str | None:
@@ -48,6 +51,77 @@ def describe_wecom_error(body: str) -> str | None:
     if not errmsg:
         return f"errcode={errcode}"
     return f"errcode={errcode} msg={errmsg}"
+
+
+def extract_trusted_ips(body: str) -> list[str] | None:
+    """从"查询可信 IP"接口的响应里取出当前可信 IP 列表。
+
+    企业微信改版后字段名可能变化，所以先按已知字段名找，找不到再退化为
+    "整个数组都是 IPv4"的结构；两者都不成立时返回 ``None`` 表示读不出来。
+
+    Args:
+        body: 接口返回的响应体文本。
+
+    Returns:
+        找到时返回 IP 列表（空列表表示后台当前一条可信 IP 都没有）；非 JSON
+        或无法识别时返回 ``None``。
+    """
+    text = body.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return None
+    for value in _iter_values_by_keys(payload, _TRUSTED_IP_KEYS):
+        ips = _normalize_ip_values(value)
+        if ips is not None:
+            return ips
+    return _find_ip_list(payload)
+
+
+def _iter_values_by_keys(payload: object, keys: frozenset[str]):
+    """递归找出字段名匹配的取值，字段名比较时忽略大小写与下划线。"""
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if str(key).lower().replace("_", "") in keys:
+                yield value
+            yield from _iter_values_by_keys(value, keys)
+    elif isinstance(payload, list):
+        for item in payload:
+            yield from _iter_values_by_keys(item, keys)
+
+
+def _normalize_ip_values(value: object) -> list[str] | None:
+    """把字段值规范成 IP 列表；值不是 IP 集合时返回 None 交给下一个候选。"""
+    if isinstance(value, str):
+        candidates = [part for part in re.split(r"[\s,;]+", value) if part]
+    elif isinstance(value, list):
+        candidates = [str(item) for item in value]
+    else:
+        return None
+    ips = [candidate for candidate in candidates if _IPV4_PATTERN.match(candidate)]
+    if candidates and not ips:
+        return None
+    return list(dict.fromkeys(ips))
+
+
+def _find_ip_list(payload: object) -> list[str] | None:
+    """兜底策略：找第一个"元素全是 IPv4 字符串"的数组。"""
+    if isinstance(payload, list):
+        ips = [item for item in payload if isinstance(item, str) and _IPV4_PATTERN.match(item)]
+        if ips and len(ips) == len(payload):
+            return list(dict.fromkeys(ips))
+        for item in payload:
+            found = _find_ip_list(item)
+            if found is not None:
+                return found
+    elif isinstance(payload, dict):
+        for value in payload.values():
+            found = _find_ip_list(value)
+            if found is not None:
+                return found
+    return None
 
 
 def extract_self_built_apps(payload: object) -> list[WeComApp]:
@@ -91,6 +165,8 @@ def merge_app_states(existing: list[WeComApp], discovered: list[WeComApp]) -> li
                     "console_app_id": app.console_app_id or stored.console_app_id,
                     "last_synced_ip": stored.last_synced_ip,
                     "last_synced_at": stored.last_synced_at,
+                    "current_trusted_ips": stored.current_trusted_ips,
+                    "trusted_ip_checked_at": stored.trusted_ip_checked_at,
                     "last_error": stored.last_error,
                 }
             )

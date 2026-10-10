@@ -6,6 +6,7 @@ from app.models import WeComApp
 from app.wecom.parsing import (
     describe_wecom_error,
     extract_self_built_apps,
+    extract_trusted_ips,
     merge_app_states,
     parse_manual_app_list,
 )
@@ -216,3 +217,46 @@ def test_describe_wecom_error_handles_missing_errmsg():
 )
 def test_describe_wecom_error_ignores_non_error_bodies(body):
     assert describe_wecom_error(body) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"data":{"trusted_ip_list":["203.0.113.10"]}}',
+        '{"data":{"ip_list":["203.0.113.10"]}}',
+        '{"data":{"ipList":["203.0.113.10"]}}',
+        '{"data":{"trusted_ip":"203.0.113.10"}}',
+    ],
+)
+def test_extract_trusted_ips_reads_known_keys(body):
+    assert extract_trusted_ips(body) == ["203.0.113.10"]
+
+
+def test_extract_trusted_ips_splits_string_value():
+    body = '{"ip_list":"203.0.113.10, 203.0.113.11"}'
+
+    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
+
+
+def test_extract_trusted_ips_returns_empty_list_when_backend_has_none():
+    assert extract_trusted_ips('{"data":{"trusted_ip_list":[]}}') == []
+
+
+def test_extract_trusted_ips_falls_back_to_plain_ip_array():
+    body = '{"result":{"items":["203.0.113.10","203.0.113.11"]}}'
+
+    assert extract_trusted_ips(body) == ["203.0.113.10", "203.0.113.11"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<html><body>login</body></html>",
+        '{"errcode":0,"errmsg":"ok"}',
+        '{"data":{"ip_list":["not-an-ip"]}}',
+        '{"data":{"name":"客服系统"}}',
+        "not json at all",
+    ],
+)
+def test_extract_trusted_ips_returns_none_when_unreadable(body):
+    assert extract_trusted_ips(body) is None

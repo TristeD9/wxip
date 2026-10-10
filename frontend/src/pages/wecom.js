@@ -1,21 +1,45 @@
 import { api } from "../api.js";
 import { badge, emptyRow, field, h, notice, panel } from "../dom.js";
-import { loginStatusText, loginStatusTone } from "../format.js";
+import { describeTrustedIps, formatTime, loginStatusText, loginStatusTone } from "../format.js";
 import { icon } from "../icons.js";
 
 const LOGIN_POLL_INTERVAL_MS = 2000;
 
 export async function renderWeComPage(ctx) {
-  const [state, appsPayload, templatePayload, appsUrlPayload] = await Promise.all([
-    api("/api/state"),
-    api("/api/wecom/apps"),
-    api("/api/wecom/template"),
-    api("/api/wecom/apps-url"),
-  ]);
+  const [state, appsPayload, templatePayload, readTemplatePayload, appsUrlPayload] =
+    await Promise.all([
+      api("/api/state"),
+      api("/api/wecom/apps"),
+      api("/api/wecom/template"),
+      api("/api/wecom/read-template"),
+      api("/api/wecom/apps-url"),
+    ]);
   return [
     loginPanel(state.wecom_login, ctx),
     appsPanel(appsPayload.apps || [], ctx),
-    templatePanel(templatePayload, ctx),
+    templatePanel({
+      title: "可信 IP 写入模板",
+      subtitle:
+        "解析后会自动把 IP 替换为 {ip}，把应用编号替换为 {agent_id} 或 {app_id}；同步时按应用逐个重放。",
+      curlPlaceholder:
+        "在企业微信管理后台手动改一次可信 IP，然后在开发者工具里对该请求选择 Copy as cURL，粘贴到这里",
+      parseUrl: "/api/wecom/template/parse",
+      saveUrl: "/api/wecom/template",
+      payload: templatePayload,
+      ctx,
+    }),
+    templatePanel({
+      title: "读取可信 IP 模板",
+      subtitle:
+        "在后台打开某个自建应用的「企业可信IP」，对该页面加载可信 IP 的请求 Copy as cURL 后粘贴解析；" +
+        "同步时用它读取企业微信里的当前可信 IP，与 iKuai 公网 IP 比对后只覆盖不一致的应用。",
+      curlPlaceholder:
+        "打开任意自建应用的「企业可信IP」，在开发者工具里对返回可信 IP 的请求选择 Copy as cURL，粘贴到这里",
+      parseUrl: "/api/wecom/read-template/parse",
+      saveUrl: "/api/wecom/read-template",
+      payload: readTemplatePayload,
+      ctx,
+    }),
     appsUrlPanel(appsUrlPayload.url, ctx),
   ];
 }
@@ -130,11 +154,22 @@ function appsPanel(apps, ctx) {
           h("td", { class: "mono", text: app.agent_id }),
           h("td", { text: app.name }),
           h("td", {}, consoleIdEditor(app)),
+          h(
+            "td",
+            {},
+            h("div", { class: "mono", text: describeTrustedIps(app) }),
+            h("div", {
+              class: "kpi-hint",
+              text: app.trusted_ip_checked_at
+                ? `读取于 ${formatTime(app.trusted_ip_checked_at)}`
+                : "尚未读取",
+            }),
+          ),
           h("td", { class: "mono", text: app.last_synced_ip || "-" }),
           h("td", { text: app.last_error || "-" }),
         ),
       )
-    : [emptyRow(5, "暂无应用数据")];
+    : [emptyRow(6, "暂无应用数据")];
 
   function consoleIdEditor(app) {
     const input = h("input", {
@@ -190,6 +225,7 @@ function appsPanel(apps, ctx) {
               h("th", { text: "AgentId" }),
               h("th", { text: "应用名称" }),
               h("th", { text: "控制台应用编号" }),
+              h("th", { text: "当前可信 IP（企业微信）" }),
               h("th", { text: "最近覆盖 IP" }),
               h("th", { text: "最近错误" }),
             ),
@@ -208,9 +244,9 @@ function appsPanel(apps, ctx) {
   });
 }
 
-function templatePanel(templatePayload, ctx) {
+function templatePanel({ title, subtitle, curlPlaceholder, parseUrl, saveUrl, payload, ctx }) {
   const curlInput = h("textarea", {
-    placeholder: "在企业微信管理后台手动改一次可信 IP，然后在开发者工具里对该请求选择 Copy as cURL，粘贴到这里",
+    placeholder: curlPlaceholder,
   });
   const parseButton = h(
     "button",
@@ -224,11 +260,11 @@ function templatePanel(templatePayload, ctx) {
     { class: "table-wrap" },
     h("p", {
       class: "empty",
-      text: templatePayload.configured ? "已保存模板，可重新解析覆盖" : "尚未录制模板",
+      text: payload.configured ? "已保存模板，可重新解析覆盖" : "尚未录制模板",
     }),
   );
   const jsonInput = h("textarea", {
-    value: templatePayload.configured ? JSON.stringify(templatePayload.template, null, 2) : "",
+    value: payload.configured ? JSON.stringify(payload.template, null, 2) : "",
     placeholder: '{ "method": "POST", "url": "...", "headers": {}, "body": "..." }',
   });
   const saveButton = h("button", { class: "btn", type: "button", onClick: saveTemplate }, icon("save"), "保存模板");
@@ -240,7 +276,7 @@ function templatePanel(templatePayload, ctx) {
     }
     parseButton.disabled = true;
     try {
-      const result = await api("/api/wecom/template/parse", {
+      const result = await api(parseUrl, {
         method: "POST",
         body: { curl: curlInput.value },
       });
@@ -258,7 +294,7 @@ function templatePanel(templatePayload, ctx) {
     saveButton.disabled = true;
     try {
       const template = JSON.parse(jsonInput.value);
-      const result = await api("/api/wecom/template", { method: "PUT", body: template });
+      const result = await api(saveUrl, { method: "PUT", body: template });
       warningsBox.replaceChildren(...(result.warnings || []).map((text) => notice(text, "warn")));
       ctx.toast("请求模板已保存");
       renderPreview(template);
@@ -286,9 +322,8 @@ function templatePanel(templatePayload, ctx) {
   }
 
   return panel({
-    title: "可信 IP 请求模板",
-    subtitle:
-      "解析后会自动把 IP 替换为 {ip}，把应用编号替换为 {agent_id} 或 {app_id}；同步时按应用逐个重放。",
+    title,
+    subtitle,
     actions: [parseButton],
     body: h(
       "div",

@@ -1,5 +1,6 @@
 """SQLite 存储读写。"""
 
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -37,6 +38,75 @@ def test_request_template_round_trip(storage):
     storage.save_request_template(template)
 
     assert storage.get_request_template() == template
+
+
+def test_read_template_round_trip(storage):
+    template = RequestTemplate(method="GET", url="https://example.com/{app_id}/trusted-ip")
+
+    storage.save_read_template(template)
+
+    assert storage.get_read_template() == template
+    assert storage.get_request_template() is None
+
+
+def test_record_app_trusted_ips_round_trip(storage):
+    storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
+
+    storage.record_app_trusted_ips(
+        "1230006", ips=["203.0.113.10"], checked_at="2026-01-01T00:00:00+00:00"
+    )
+
+    stored_app = storage.list_wecom_apps()[0]
+    assert stored_app.current_trusted_ips == ["203.0.113.10"]
+    assert stored_app.trusted_ip_checked_at == datetime.fromisoformat(
+        "2026-01-01T00:00:00+00:00"
+    )
+
+
+def test_record_app_trusted_ips_clears_previous_error(storage):
+    storage.replace_wecom_apps([WeComApp(agent_id="1230006", name="客服系统")])
+    storage.update_app_sync_result(
+        "1230006", synced_ip=None, synced_at=None, error="企业微信返回 HTTP 500"
+    )
+
+    storage.record_app_trusted_ips(
+        "1230006", ips=["203.0.113.10"], checked_at="2026-01-01T00:00:00+00:00"
+    )
+
+    assert storage.list_wecom_apps()[0].last_error is None
+
+
+def test_initialize_upgrades_legacy_apps_table(tmp_path):
+    """老库升级后要自动长出新增的列，且原有数据不丢。"""
+    database_path = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE wecom_apps (
+            agent_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            last_synced_ip TEXT,
+            last_synced_at TEXT,
+            last_error TEXT
+        );
+        """
+    )
+    connection.execute(
+        "INSERT INTO wecom_apps (agent_id, name, last_synced_ip) "
+        "VALUES ('1230006', '客服系统', '8.8.8.8')"
+    )
+    connection.commit()
+    connection.close()
+
+    legacy_storage = AppStorage(database_path)
+    legacy_storage.initialize()
+
+    upgraded_app = legacy_storage.list_wecom_apps()[0]
+    assert upgraded_app.name == "客服系统"
+    assert upgraded_app.last_synced_ip == "8.8.8.8"
+    assert upgraded_app.console_app_id is None
+    assert upgraded_app.current_trusted_ips is None
+    assert upgraded_app.trusted_ip_checked_at is None
 
 
 def test_sync_settings_fall_back_to_default(storage):

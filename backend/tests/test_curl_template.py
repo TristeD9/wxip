@@ -7,6 +7,7 @@ from app.wecom.curl_template import (
     CurlParseError,
     mask_header_values,
     parse_curl_command,
+    validate_read_template,
     validate_request_template,
 )
 
@@ -103,6 +104,19 @@ def test_validate_request_template_requires_ip_placeholder():
 
     with pytest.raises(CurlParseError, match="\\{ip\\}"):
         validate_request_template(template)
+
+
+def test_validate_read_template_requires_app_placeholder():
+    template = RequestTemplate(method="GET", url="https://example.com/app/info")
+
+    with pytest.raises(CurlParseError, match="无法逐个应用读取"):
+        validate_read_template(template)
+
+
+def test_validate_read_template_accepts_console_app_id():
+    template = RequestTemplate(method="GET", url="https://example.com/app/{app_id}/ip")
+
+    assert validate_read_template(template) == []
 
 
 def test_validate_request_template_warns_without_agent_placeholder():

@@ -94,7 +94,7 @@ def validate_request_template(template: RequestTemplate) -> list[str]:
     Raises:
         CurlParseError: 模板中没有任何可替换的公网 IP 位置。
     """
-    haystack = " ".join([template.url, template.body or "", json.dumps(template.headers, ensure_ascii=False)])
+    haystack = _template_haystack(template)
     if IP_PLACEHOLDER not in haystack:
         raise CurlParseError(
             f"请求中未找到公网 IP 位置，请在地址或请求体里手工保留一个 {IP_PLACEHOLDER} 占位符"
@@ -111,16 +111,36 @@ def validate_request_template(template: RequestTemplate) -> list[str]:
     return warnings
 
 
+def validate_read_template(template: RequestTemplate) -> list[str]:
+    """校验查询可信 IP 的模板能否逐个应用读取。
+
+    Raises:
+        CurlParseError: 模板里没有任何应用编号占位符，那样每个应用都会读到同一份配置。
+    """
+    haystack = _template_haystack(template)
+    if AGENT_ID_PLACEHOLDER not in haystack and APP_ID_PLACEHOLDER not in haystack:
+        raise CurlParseError(
+            f"读取请求里没有 {AGENT_ID_PLACEHOLDER} 或 {APP_ID_PLACEHOLDER} 占位符，"
+            "无法逐个应用读取当前可信 IP"
+        )
+    return []
+
+
 def required_placeholders(template: RequestTemplate) -> set[str]:
     """返回模板里实际用到的编号占位符，供同步前检查应用是否有对应编号。"""
-    haystack = " ".join(
-        [template.url, template.body or "", json.dumps(template.headers, ensure_ascii=False)]
-    )
+    haystack = _template_haystack(template)
     return {
         placeholder
         for placeholder in (AGENT_ID_PLACEHOLDER, APP_ID_PLACEHOLDER)
         if placeholder in haystack
     }
+
+
+def _template_haystack(template: RequestTemplate) -> str:
+    """把模板的可搜索部分拼成一段文本，供占位符检查复用。"""
+    return " ".join(
+        [template.url, template.body or "", json.dumps(template.headers, ensure_ascii=False)]
+    )
 
 
 def parse_curl_command(command: str, *, known_agent_ids: list[str] | None = None) -> RequestTemplate:

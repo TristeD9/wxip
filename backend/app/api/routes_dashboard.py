@@ -33,6 +33,7 @@ async def read_dashboard_state(
         "ikuai": _describe_ikuai(storage),
         "wecom_login": wecom_session.login_state().model_dump(),
         "template_configured": storage.get_request_template() is not None,
+        "read_template_configured": storage.get_read_template() is not None,
         "apps": [app.model_dump() for app in storage.list_wecom_apps()],
         "sync_settings": storage.get_sync_settings(default_sync_settings).model_dump(),
         "latest_public_ip": _describe_latest_ip(storage),

@@ -44,6 +44,8 @@ class WeComApp(BaseModel):
     console_app_id: str | None = None
     last_synced_ip: str | None = None
     last_synced_at: datetime | None = None
+    current_trusted_ips: list[str] | None = None
+    trusted_ip_checked_at: datetime | None = None
     last_error: str | None = None
 
 
@@ -93,6 +95,7 @@ class SyncAppResult(BaseModel):
     name: str
     success: bool
     message: str
+    updated: bool = False
 
 
 class SyncSummary(BaseModel):
