@@ -93,6 +93,7 @@ jobs:
           IMAGE="$(printf '%s\n' "$IMAGE_TAGS" | head -n1)"
           echo "smoke test image: $IMAGE"
           docker pull "$IMAGE"
+          docker image inspect "$IMAGE" --format 'image size: {{.Size}} bytes'
           docker run --rm "$IMAGE" python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); b = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage']); b.close(); p.stop(); print('chromium ok')"
           docker run -d --name wxip-smoke -e APP_SECRET_KEY=smoke-test -e APP_DATA_DIR=/tmp/data -p 18123:8000 "$IMAGE"
           for _ in $(seq 1 30); do
