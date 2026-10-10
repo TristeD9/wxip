@@ -105,14 +105,6 @@ function appsPanel(apps, ctx) {
     icon("search"),
     "自动发现应用",
   );
-  const manualInput = h("textarea", { placeholder: "每行一个：agentid,应用名,控制台应用编号" });
-  const manualButton = h(
-    "button",
-    { class: "btn", type: "button", onClick: saveManual },
-    icon("save"),
-    "导入清单",
-  );
-
   async function discover() {
     discoverButton.disabled = true;
     try {
@@ -126,26 +118,6 @@ function appsPanel(apps, ctx) {
     }
   }
 
-  async function saveManual() {
-    if (!manualInput.value.trim()) {
-      ctx.toast("请先粘贴应用清单", "error");
-      return;
-    }
-    manualButton.disabled = true;
-    try {
-      const result = await api("/api/wecom/apps/manual", {
-        method: "PUT",
-        body: { text: manualInput.value },
-      });
-      ctx.toast(`已保存 ${result.apps.length} 个应用`);
-      ctx.refresh();
-    } catch (error) {
-      ctx.toast(error.message, "error");
-    } finally {
-      manualButton.disabled = false;
-    }
-  }
-
   const rows = apps.length
     ? apps.map((app) =>
         h(
@@ -153,7 +125,7 @@ function appsPanel(apps, ctx) {
           {},
           h("td", { class: "mono", text: app.agent_id }),
           h("td", { text: app.name }),
-          h("td", {}, consoleIdEditor(app)),
+          h("td", { class: "mono", text: app.console_app_id || "-" }),
           h(
             "td",
             {},
@@ -171,41 +143,10 @@ function appsPanel(apps, ctx) {
       )
     : [emptyRow(6, "暂无应用数据")];
 
-  function consoleIdEditor(app) {
-    const input = h("input", {
-      type: "text",
-      value: app.console_app_id || "",
-      placeholder: "如 5629500000000001",
-      style: "width: 168px",
-    });
-    const saveButton = h(
-      "button",
-      { class: "btn btn-icon", type: "button", title: "保存控制台应用编号", onClick: save },
-      icon("save"),
-    );
-
-    async function save() {
-      saveButton.disabled = true;
-      try {
-        await api(`/api/wecom/apps/${encodeURIComponent(app.agent_id)}/console-app-id`, {
-          method: "PUT",
-          body: { console_app_id: input.value.trim() },
-        });
-        ctx.toast("控制台应用编号已保存");
-        ctx.refresh();
-      } catch (error) {
-        ctx.toast(error.message, "error");
-      } finally {
-        saveButton.disabled = false;
-      }
-    }
-
-    return h("div", { class: "row" }, input, saveButton);
-  }
-
   return panel({
     title: "自建应用清单",
-    subtitle: "自动发现依赖管理后台页面结构；失败时可用手工清单兜底。",
+    subtitle:
+      "「自动发现应用」会连管理后台一起读取应用名称、AgentId 与控制台应用编号，无需手工维护。",
     actions: [discoverButton],
     body: h(
       "div",
@@ -233,13 +174,6 @@ function appsPanel(apps, ctx) {
           h("tbody", {}, rows),
         ),
       ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", { text: "手工导入（每行：agentid,应用名,控制台应用编号）" }),
-        manualInput,
-      ),
-      h("div", { class: "toolbar" }, manualButton),
     ),
   });
 }

@@ -437,6 +437,30 @@ docker exec -it <容器名> python -m app.cli reset-admin
 此时读取会判为"读不出来"（仍会照写，只是标注未完成校验）。等至少一个应用配上 IP 后，
 字段名就能被识别出来。
 
+## 二十、精简企业微信页并固定侧边栏
+
+用户要求（2026-10-10）：
+
+1. 去掉「手工导入应用清单」——自动发现已经稳定可用；
+2. 「控制台应用编号」改成只读显示，不要再有输入框和保存按钮；
+3. 侧边栏固定，页面滚动时不跟着滑走。
+
+处理：
+
+- `frontend/src/pages/wecom.js`：删掉手工导入的 textarea / 按钮与 `saveManual()`，删掉
+  `consoleIdEditor()`（输入框 + 保存按钮），控制台应用编号改为直接显示；面板副标题改成说明
+  "自动发现会连应用名称、AgentId、控制台应用编号一起读回来"。
+  后端 `PUT /api/wecom/apps/manual` 与 `/api/wecom/apps/{agent_id}/console-app-id` 保留为 API 级兜底，
+  README 已注明界面不再提供入口。
+- `frontend/styles/main.css`：`.sidebar` 改为 `position: sticky; top: 0; height: 100vh;
+  overflow-y: auto`（配合 `align-self: start`）——页面滚动时侧边栏固定不动，导航本身过长时它自己滚动；
+  窄屏（≤860px）在媒体查询里改回 `position: static`，避免顶部横向导航与吸顶工具栏互相遮挡。
+- 文档：README 与部署指南里"手工导入 / 手工补填控制台应用编号"的说法统一改成"自动发现即可，
+  API 兜底"。
+
+验证：前端无测试框架，只做了 `node --check` 与模块导入校验；侧边栏固定属于纯 CSS 改动，
+由使用者在浏览器里确认效果。
+
 ## Resume 入口
 
 ### 当前状态快照
@@ -455,6 +479,7 @@ docker exec -it <容器名> python -m app.cli reset-admin
   读取失败原因会写进面板「最近错误」，可用 `python -m app.cli check-trusted-ips` 排查；
 - 读取接口已换成**应用管理页的列表响应**（见十九）：不需要录任何模板即可读到每个应用的当前可信 IP，
   同步流程为"读全部 → 只写不一致 → 统一回读确认"；
+- 界面已精简（见二十）：企业微信页不再提供手工导入与控制台编号编辑，侧边栏滚动时固定；
 - 镜像已构建并推送（仓库里统一用 `YOUR_DOCKERHUB/wxip:latest` 占位，使用者替换成自己的地址）；
   压缩约 1.0 GB、解压 3.73 GB，自带 Chromium；
 - 真实环境全链路验证通过：扫码登录 → 读取 iKuai 公网 IP → 覆盖全部自建应用的可信 IP

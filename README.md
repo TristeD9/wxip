@@ -181,8 +181,8 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
    点「测试并读取公网 IP」。失败时点「探测原始响应」，把返回发给维护者按固件适配。
 3. **扫码登录企业微信**：进入「企业微信」页 → 点「重新扫码登录」→ 用企业微信管理员手机扫码。
    （扫码是为了拿"写可信 IP"的权限，和面板账号无关。）
-4. **自动发现应用**：点「自动发现应用」，会列出所有自建应用（系统应用自动排除）。
-   失败时可用「手工导入」，格式：`agentid,应用名,控制台应用编号`。
+4. **自动发现应用**：点「自动发现应用」，会列出所有自建应用（系统内置应用自动排除），并自动带上
+   AgentId 与控制台应用编号，不需要手工维护清单。
 5. **配置「可信 IP 写入模板」**（两种方式任选其一）：
    - **省事**：把 `outputs/deploy/trusted-ip-template.json` 的内容粘到「模板 JSON」框 → 保存模板；
    - **通用**（企业微信改版后用）：在管理后台手动改一次任意应用的可信 IP，用开发者工具对该请求
@@ -209,7 +209,7 @@ docker exec -it wecom-trusted-ip python -m app.cli list-admins   # 首次应为�
 | 页面 | 能做什么 |
 | --- | --- |
 | 仪表盘 | 当前公网 IP、每个应用的**当前可信 IP**与覆盖情况、只读「获取当前可信 IP」、手动「立即同步」、开关自动同步与调整间隔 |
-| 企业微信 | 扫码登录、自动发现应用、查看与编辑应用清单/控制台应用编号、配置写入与读取两套请求模板 |
+| 企业微信 | 扫码登录、自动发现应用（含 AgentId 与控制台应用编号）、每个应用的当前可信 IP、配置写入模板与备用读取模板 |
 | iKuai | 连接配置、测试并读取公网 IP、探测原始响应 |
 | 同步日志 | 最近 100 次同步记录，可展开查看每个应用的成功/失败与原因 |
 | 账号 | 显示当前管理员、修改密码、忘记密码的找回说明 |
@@ -243,7 +243,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 | 面板管理员 | 首次打开的创建页 | 用户名 `admin` / 密码 `MyPassw0rd!` |
 | iKuai 连接 | 面板「iKuai」页 | 地址 `http://192.168.1.1`、用户名 `admin`、密码 `********` |
 | 企业微信登录 | 面板「企业微信」页 | 手机扫码（二维码由服务端截图返回） |
-| 应用清单 | 自动发现，或手工导入 | `1230002,示例应用,5629500000000002` |
+| 应用清单 | 「企业微信」页点自动发现 | 自动读取，例如 `1230002,示例应用,5629500000000002` |
 | 请求模板 | 粘贴 cURL 或模板 JSON | 见 5.3 |
 | 同步策略 | 面板「仪表盘」 | 自动同步开、间隔 `300` 秒 |
 
@@ -348,8 +348,8 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 | POST | `/api/ikuai/probe` | 各 WAN 查询方式的原始响应（脱敏） |
 | GET | `/api/wecom/apps` | 已保存的应用清单 |
 | POST | `/api/wecom/apps/discover` | 自动发现自建应用 |
-| PUT | `/api/wecom/apps/manual` | 手工导入应用清单 |
-| PUT | `/api/wecom/apps/{agent_id}/console-app-id` | 补录控制台应用编号 |
+| PUT | `/api/wecom/apps/manual` | 手工导入应用清单（API 兜底，界面已不再提供入口） |
+| PUT | `/api/wecom/apps/{agent_id}/console-app-id` | 补录控制台应用编号（API 兜底） |
 | GET / PUT | `/api/wecom/apps-url` | 应用管理页地址（后台改版时调整） |
 | GET / PUT | `/api/wecom/template` | 可信 IP 写入模板 |
 | POST | `/api/wecom/template/parse` | 解析 cURL 生成写入模板预览 |

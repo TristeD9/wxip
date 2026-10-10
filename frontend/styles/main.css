@@ -52,6 +52,12 @@ a {
 }
 
 .sidebar {
+  /* 页面滚动时侧边栏固定不动，内容过长时它自己滚动 */
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
   background: #10201f;
   color: #d7e3e1;
   padding: 20px 14px;
@@ -553,6 +559,9 @@ details.disclosure summary {
   }
 
   .sidebar {
+    /* 窄屏改成顶部横向导航条，跟着页面走，避免和吸顶工具栏打架 */
+    position: static;
+    height: auto;
     flex-direction: row;
     align-items: center;
     overflow-x: auto;
