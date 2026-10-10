@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_storage, get_sync_service, require_session
@@ -10,6 +10,7 @@ from app.models import SyncSettings, SyncSummary
 from app.services.scheduler import MIN_INTERVAL_SECONDS
 from app.services.sync_service import SyncService
 from app.storage import AppStorage
+from app.wecom.admin_browser import WeComAdminError
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -65,4 +66,23 @@ async def list_sync_events(
 ) -> list[SyncSummary]:
     """返回最近的同步历史。"""
     return storage.list_sync_summaries(limit=max(1, min(limit, 200)))
+
+
+@router.post("/refresh-trusted-ips")
+async def refresh_trusted_ips(
+    sync_service: SyncService = Depends(get_sync_service),
+    storage: AppStorage = Depends(get_storage),
+    _session: str = Depends(require_session),
+) -> dict[str, object]:
+    """只读取每个应用当前的可信 IP，供面板随时核对；不会修改企业微信里的配置。"""
+    try:
+        summary = await sync_service.refresh_trusted_ips()
+    except WeComAdminError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return {
+        "message": summary.message,
+        "checked_at": summary.checked_at.isoformat(),
+        "failed": summary.failed,
+        "apps": [app.model_dump() for app in storage.list_wecom_apps()],
+    }
 

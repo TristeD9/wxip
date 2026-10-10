@@ -116,6 +116,15 @@ class SyncSettings(BaseModel):
     interval_seconds: int = 300
 
 
+class TrustedIpCheckSummary(BaseModel):
+    """一次"只读核对当前可信 IP"的结果。"""
+
+    checked_at: datetime
+    total: int
+    failed: int
+    message: str
+
+
 class IpProviderProbe(BaseModel):
     """iKuai 探测请求的原始返回，用于前端排障。"""
 

@@ -449,3 +449,54 @@ async def test_sync_notes_when_read_back_is_unavailable(storage):
     assert "回读校验未完成" in summary.results[0].message
     assert storage.list_wecom_apps()[0].last_synced_ip == "9.9.9.9"
 
+
+async def test_refresh_trusted_ips_reads_every_app_without_writing(storage):
+    """只读核对：读完刷新本地读数，但不发任何写入请求。"""
+    prepare_storage(
+        storage,
+        apps=[
+            WeComApp(agent_id="1230001", name="订单系统"),
+            WeComApp(agent_id="1230002", name="客服系统"),
+        ],
+    )
+    prepare_read_template(storage)
+    wecom_service = FakeWeComSession(
+        trusted_ips_by_agent={"1230001": ["1.1.1.1"], "1230002": []}
+    )
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_service
+    )
+
+    summary = await service.refresh_trusted_ips()
+
+    assert summary.total == 2
+    assert summary.failed == 0
+    assert wecom_service.calls == []
+    assert wecom_service.reads == ["1230001", "1230002"]
+    readings = {app.agent_id: app.current_trusted_ips for app in storage.list_wecom_apps()}
+    assert readings == {"1230001": ["1.1.1.1"], "1230002": []}
+
+
+async def test_refresh_trusted_ips_requires_read_template(storage):
+    prepare_storage(storage)
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(), wecom_session=FakeWeComSession()
+    )
+
+    with pytest.raises(WeComAdminError, match="读取可信 IP 模板"):
+        await service.refresh_trusted_ips()
+
+
+async def test_refresh_trusted_ips_counts_unreadable_apps(storage):
+    prepare_storage(storage)
+    prepare_read_template(storage)
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(), wecom_session=FakeWeComSession()
+    )
+
+    summary = await service.refresh_trusted_ips()
+
+    assert summary.failed == 1
+    assert "0/1" in summary.message
+    assert "1 个读取失败" in summary.message
+

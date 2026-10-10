@@ -13,9 +13,11 @@ from app.models import (
     RequestTemplate,
     SyncAppResult,
     SyncSummary,
+    TrustedIpCheckSummary,
     WeComApp,
     WeComLoginState,
 )
+from app.wecom.admin_browser import WeComAdminError
 from app.passwords import hash_password
 from app.security import create_session_token
 
@@ -57,6 +59,7 @@ class StubSyncService:
 
     def __init__(self) -> None:
         self.force_flags: list[bool] = []
+        self.refresh_error: str | None = None
 
     async def sync(self, *, force: bool = False) -> SyncSummary:
         self.force_flags.append(force)
@@ -68,6 +71,16 @@ class StubSyncService:
             status="ok",
             message="已覆盖 1/1 个应用的可信 IP",
             results=[SyncAppResult(agent_id="1230002", name="客服系统", success=True, message="已覆盖")],
+        )
+
+    async def refresh_trusted_ips(self) -> TrustedIpCheckSummary:
+        if self.refresh_error is not None:
+            raise WeComAdminError(self.refresh_error)
+        return TrustedIpCheckSummary(
+            checked_at=datetime.now(timezone.utc),
+            total=1,
+            failed=0,
+            message="已读取 1/1 个应用的当前可信 IP",
         )
 
 
@@ -191,6 +204,25 @@ def test_read_template_save_rejects_missing_app_placeholder(client):
 
     assert response.status_code == 400
     assert "无法逐个应用读取" in response.json()["detail"]
+
+
+def test_refresh_trusted_ips_returns_updated_apps(client):
+    client.put("/api/wecom/apps/manual", json={"text": "1230006,客服系统"})
+
+    response = client.post("/api/sync/refresh-trusted-ips")
+
+    assert response.status_code == 200
+    assert "已读取 1/1" in response.json()["message"]
+    assert response.json()["apps"][0]["agent_id"] == "1230006"
+
+
+def test_refresh_trusted_ips_reports_wecom_error(client):
+    client.app.state.sync_service.refresh_error = "尚未录制「读取可信 IP 模板」，无法读取当前可信 IP"
+
+    response = client.post("/api/sync/refresh-trusted-ips")
+
+    assert response.status_code == 502
+    assert "读取可信 IP 模板" in response.json()["detail"]
 
 
 def test_manual_app_import(client):

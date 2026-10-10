@@ -84,6 +84,12 @@ function syncPanel(state, ctx) {
     icon("play"),
     "立即同步",
   );
+  const refreshButton = h(
+    "button",
+    { class: "btn", type: "button", onClick: refreshTrustedIps },
+    icon("refresh"),
+    "获取当前可信 IP",
+  );
   const autoInput = h("input", { type: "checkbox", checked: state.sync_settings.auto_enabled });
   const intervalInput = h("input", {
     type: "number",
@@ -115,6 +121,19 @@ function syncPanel(state, ctx) {
     }
   }
 
+  async function refreshTrustedIps() {
+    refreshButton.disabled = true;
+    try {
+      const result = await api("/api/sync/refresh-trusted-ips", { method: "POST" });
+      ctx.toast(result.message, result.failed ? "error" : "info");
+      ctx.refresh();
+    } catch (error) {
+      ctx.toast(error.message, "error");
+    } finally {
+      refreshButton.disabled = false;
+    }
+  }
+
   async function saveSettings() {
     saveButton.disabled = true;
     try {
@@ -137,7 +156,7 @@ function syncPanel(state, ctx) {
   const body = h(
     "div",
     { class: "stack" },
-    h("div", { class: "row" }, runButton),
+    h("div", { class: "row" }, runButton, refreshButton),
     h(
       "div",
       { class: "row" },
@@ -145,13 +164,18 @@ function syncPanel(state, ctx) {
       h("label", { class: "checkbox-row" }, "间隔（秒）", intervalInput),
       saveButton,
     ),
+    h("div", {
+      class: "kpi-hint",
+      text:
+        "「获取当前可信 IP」只读不写，随时核对；关闭自动同步后仍会按间隔读取当前可信 IP，" +
+        "但不会自动覆盖。",
+    }),
   );
 
   return panel({
     title: "同步控制",
     subtitle:
-      "「立即同步」会用最新公网 IP 重新覆盖所有自建应用（可修复企业微信侧被改动的可信 IP）；" +
-      "自动同步只在公网 IP 变化时写入，仅保留最新一条。",
+      "「立即同步」先读取各应用当前可信 IP，只覆盖与最新公网 IP 不一致的应用，最终只保留最新一条。",
     body,
   });
 }

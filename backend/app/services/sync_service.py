@@ -17,6 +17,7 @@ from app.models import (
     SyncAppResult,
     SyncStatus,
     SyncSummary,
+    TrustedIpCheckSummary,
     WeComApp,
 )
 from app.services.public_ip import PublicIpError
@@ -167,6 +168,39 @@ class SyncService:
                 f"{_describe_previous_ips(current_ips, read_error)}"
             ),
             updated=True,
+        )
+
+    async def refresh_trusted_ips(self) -> TrustedIpCheckSummary:
+        """只读核对所有应用的当前可信 IP，不修改企业微信里的任何配置。
+
+        Raises:
+            WeComAdminError: 未录制读取模板、没有应用清单，或企业微信登录态失效。
+        """
+        read_template = self._storage.get_read_template()
+        if read_template is None:
+            raise WeComAdminError("尚未录制「读取可信 IP 模板」，无法读取当前可信 IP")
+        apps = self._storage.list_wecom_apps()
+        if not apps:
+            raise WeComAdminError("尚未发现任何企业微信自建应用")
+        await self._wecom_session.ensure_logged_in()
+
+        observation = self._storage.latest_public_ip()
+        ip_for_template = observation.ip if observation else ""
+        failed = 0
+        for app in apps:
+            trusted_ips, read_error = await self._read_current_trusted_ips(
+                app, read_template, ip_for_template
+            )
+            if trusted_ips is None:
+                failed += 1
+                logger.warning("应用 %s 读取当前可信 IP 失败：%s", app.agent_id, read_error)
+
+        suffix = f"，{failed} 个读取失败" if failed else ""
+        return TrustedIpCheckSummary(
+            checked_at=_utc_now(),
+            total=len(apps),
+            failed=failed,
+            message=f"已读取 {len(apps) - failed}/{len(apps)} 个应用的当前可信 IP{suffix}",
         )
 
     async def _read_current_trusted_ips(
