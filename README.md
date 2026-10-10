@@ -373,20 +373,26 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 ## 九、开发与测试
 
 ```powershell
-# 依赖
+# 后端依赖
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
 
-# 单元测试（当前 127 条）
+# 后端单元测试（当前 149 条）
 .\scripts\run_tests.ps1
+
+# 前端单元测试（vitest + jsdom，当前 15 条；首次会自动 npm ci）
+.\scripts\run_frontend_tests.ps1
 
 # 本机启动（8000 端口，同时托管前端）
 .\scripts\run_backend.ps1
 
 # 构建并推送镜像（国内可换基础镜像源与 PyPI 源）
 .\scripts\build_and_push_image.ps1 -Repository <用户名>/<仓库名> -Tag latest `
-    -BaseRegistry mcr.m.daocloud.io -PipIndexUrl https://pypi.tuna.tsinghua.edu.cn/simple
+    -BaseRegistry docker.m.daocloud.io -PipIndexUrl https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+推送代码到 `main`（或提 PR）时，GitHub Actions 会自动跑上面两套测试（`.github/workflows/tests.yml`）；
+镜像构建是单独的工作流，只在打 `v*` 标签或手动触发时执行。
 
 ## 十、文档索引
 

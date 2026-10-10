@@ -515,11 +515,35 @@ apt 缓存；浏览器路径用 `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` 固定
 文档纠错（优化点 4）：登录态其实保存在 `DATA_DIR/wecom_state.json` 并在重启后复用，原先"登录态不落盘、
 每次重启都要重扫一次"的说法不准确，README 与部署指南已改成"会话会被官网/手机端登录挤下线"。
 
+## 二十三、前端最小测试 + CI 跑两套测试
+
+用户选择（2026-10-10）：优化点 6 的最后一件事也做掉——给前端加最小自动化测试，并让 CI 每次推送
+都跑后端 + 前端两套。
+
+做法（"最小"：只覆盖最容易悄悄坏掉的部分）：
+
+- `frontend/package.json` + `vitest.config.js`：vitest（`environment: "jsdom"`）作为开发依赖，
+  `npm test` 即 `vitest run`；依赖只装在本机 `node_modules`，**不进仓库、不进镜像**
+  （`.dockerignore` 加了 `frontend/node_modules`，因为 Dockerfile 会 `COPY frontend/`）；
+- `frontend/tests/format.test.js`：`formatTime` / 同步状态与登录状态的文案与色调映射，含"未知状态有
+  兜底、不会渲染出 undefined"；
+- `frontend/tests/dashboard.test.js`：用假数据渲染仪表盘，断言应用名、当前公网 IP、"已是最新"都在、
+  **不再出现已移除的「当前可信 IP」入口**、结果里不含 `undefined`；并模拟点击「立即同步」，
+  断言确实调用 `/api/sync/run` 且 `force: true`；
+- `frontend/tests/wecom.test.js`：渲染企业微信页，断言应用清单与控制台应用编号正常显示、不再有
+  「手工导入」入口与「当前可信 IP」列、结果里不含 `undefined`；
+- `scripts/run_frontend_tests.ps1`：一条命令跑前端测试，首次会自动 `npm ci`；
+- `.github/workflows/tests.yml`：推送到 main 与 PR 时跑两个 job——后端 `pytest -q`、
+  前端 `npm ci && npm test`（只改文档不触发）。镜像构建仍是独立工作流，只在 `v*` 标签或手动触发时跑。
+
+结果：后端 149 条 + 前端 15 条，全绿。
+
 ## Resume 入口
 
 ### 当前状态快照
 
-- 代码、测试、部署件均已就绪；单元测试 **149 passed**；
+- 代码、测试、部署件均已就绪；后端 **149 passed**、前端 **15 passed**（vite + jsdom）；
+- CI：推送到 main 与 PR 会自动跑上面两套测试（`.github/workflows/tests.yml`，见二十三）；
 - 同步成败判定已修正为解析企业微信响应体的 `errcode`（见十二），面板不会再把
   "被后台拒绝"显示成同步成功；
 - 会话失效时企业微信会返回登录页网页，这种"假成功"也已被识别（见十五）；
@@ -539,7 +563,8 @@ apt 缓存；浏览器路径用 `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` 固定
 1. 若面板报 `errcode` 相关错误：会话类错误先重新扫码；`app_id` 类错误去「企业微信」
    页核对该应用的「控制台应用编号」；
 2. 构建新镜像后确认体积与冒烟测试（工作流里的 Smoke test 步骤）都通过；
-3. 若要给同步加"失败通知"（企业微信/钉钉群机器人等）：目前没有，需要新增；
+3. 改前端时记得跑 `.\scripts\run_frontend_tests.ps1`（CI 也会跑，但本地更快）；
+4. 若要给同步加"失败通知"（企业微信/钉钉群机器人等）：目前没有，需要新增；
 4. 企业微信后台若改版：先看 `data/wecom_discover_debug.json` 里的 `app_entry_samples`，
    再调整 `backend/app/wecom/parsing.py` 的判别规则；
 5. iKuai 若换固件：用面板「iKuai → 探测原始响应」，按返回结构调整
