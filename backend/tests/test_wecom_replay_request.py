@@ -11,6 +11,10 @@ from app.wecom.admin_browser import WeComAdminError, WeComAdminSession
 FRAME_URL = "https://work.weixin.qq.com/wework_admin/frame#/apps"
 LOGIN_URL = "https://work.weixin.qq.com/wework_admin/loginpage_wx?from=myhome"
 SUCCESS_BODY = '{"errcode":0,"errmsg":"ok"}'
+LOGIN_PAGE_BODY = (
+    '<!DOCTYPE html><html><body><iframe src="https://open.work.weixin.qq.com/wwopen/login_qrcode">'
+    "</iframe><p>请扫码登录</p></body></html>"
+)
 
 
 class FakeResponse:
@@ -37,9 +41,10 @@ class FakeRequestContext:
 class FakePage:
     """只实现登录态校验用到的页面动作。"""
 
-    def __init__(self, *, redirect_to: str | None = None) -> None:
+    def __init__(self, *, redirect_to: str | None = None, shows_login_qr: bool = False) -> None:
         self.url = FRAME_URL
         self.redirect_to = redirect_to
+        self.shows_login_qr = shows_login_qr
         self.closed = False
 
     async def goto(self, url: str, **kwargs) -> None:
@@ -54,6 +59,19 @@ class FakePage:
 
     async def close(self) -> None:
         self.closed = True
+
+    def locator(self, selector: str):
+        return FakeLocator(1 if self.shows_login_qr else 0)
+
+
+class FakeLocator:
+    """只实现 count()，用于模拟二维码元素是否存在。"""
+
+    def __init__(self, count: int) -> None:
+        self._count = count
+
+    async def count(self) -> int:
+        return self._count
 
 
 class FakeBrowserContext:
@@ -132,6 +150,31 @@ async def test_replay_request_raises_on_http_error(tmp_path):
         )
 
 
+async def test_replay_request_raises_when_backend_returns_login_page(tmp_path):
+    """会话失效时后台会把登录页网页当接口响应返回，不能当成写入成功。"""
+    context = FakeBrowserContext(response=FakeResponse(status=200, body=LOGIN_PAGE_BODY))
+    session = build_session(context, tmp_path / "state.json")
+
+    with pytest.raises(WeComAdminError, match="登录态已失效"):
+        await session.replay_request(
+            build_template(), agent_id="1230006", app_id="5629500000000001", ip="9.9.9.9"
+        )
+
+    assert session.login_state().status == "failed"
+
+
+async def test_replay_request_raises_when_backend_returns_html(tmp_path):
+    context = FakeBrowserContext(
+        response=FakeResponse(status=200, body="<html><body>bad gateway</body></html>")
+    )
+    session = build_session(context, tmp_path / "state.json")
+
+    with pytest.raises(WeComAdminError, match="网页而不是接口 JSON"):
+        await session.replay_request(
+            build_template(), agent_id="1230006", app_id="5629500000000001", ip="9.9.9.9"
+        )
+
+
 async def test_ensure_logged_in_fails_when_backend_redirects_to_login(tmp_path):
     page = FakePage(redirect_to=LOGIN_URL)
     context = FakeBrowserContext(response=FakeResponse(status=200, body=SUCCESS_BODY), page=page)
@@ -153,3 +196,15 @@ async def test_ensure_logged_in_accepts_cached_state_after_checking_backend(tmp_
 
     assert session.login_state().status == "logged_in"
     assert page.closed is True
+
+
+async def test_ensure_logged_in_fails_when_page_still_shows_qr(tmp_path):
+    """URL 还停在 frame 但页面里已经有登录二维码，同样判定为登录失效。"""
+    page = FakePage(shows_login_qr=True)
+    context = FakeBrowserContext(response=FakeResponse(status=200, body=SUCCESS_BODY), page=page)
+    session = build_session(context, tmp_path / "state.json")
+
+    with pytest.raises(WeComAdminError, match="重新扫码"):
+        await session.ensure_logged_in()
+
+    assert session.login_state().status == "failed"

@@ -39,6 +39,8 @@ _RECORDED_RESOURCE_TYPES = {"xhr", "fetch", "document"}
 _MAX_RECORDED_BODY_CHARS = 200_000
 _DEBUG_FILE_NAME = "wecom_discover_debug.json"
 _READ_DEBUG_FILE_NAME = "wecom_read_debug.json"
+# 会话失效时后台返回的是登录页网页，用这些特征把它和正常 JSON 响应区分开
+_LOGIN_PAGE_MARKERS = ("loginpage_wx", "login_qrcode", "ww_login_qrcode", "扫码登录")
 
 
 class WeComAdminError(RuntimeError):
@@ -201,6 +203,12 @@ class WeComAdminSession:
                 raise WeComAdminError(
                     f"企业微信返回 HTTP {response.status}：{text[:200]}"
                 )
+            # 登录态失效时后台会把登录页网页当成接口响应返回，HTTP 状态同样是 200
+            if _looks_like_login_page(text):
+                self._set_state("failed", message="企业微信登录态已失效，请重新扫码")
+                raise WeComAdminError("企业微信返回了登录页，登录态已失效，请重新扫码登录")
+            if _looks_like_html(text):
+                raise WeComAdminError("企业微信返回的是网页而不是接口 JSON，请重新录制请求模板")
             # 后台拒绝写入时同样是 200，只把原因写在响应体里，必须解析出来
             error_detail = describe_wecom_error(text)
             if error_detail is not None:
@@ -251,13 +259,22 @@ class WeComAdminSession:
             )
             # 登录态失效时后台会跳回登录页，等网络安静下来再判断，避免误判成已登录
             await _wait_for_network_idle(page)
-            if not self._is_admin_frame(page.url):
+            if not self._is_admin_frame(page.url) or await self._page_shows_login(page):
                 self._set_state("failed", message="企业微信登录态已失效，请重新扫码")
                 raise WeComAdminError("企业微信登录态已失效，请重新扫码登录")
             await self._mark_logged_in()
         finally:
             if created_page:
                 await page.close()
+
+    @staticmethod
+    async def _page_shows_login(page: Page) -> bool:
+        """页面里出现登录二维码就说明会话已失效（此时 URL 可能仍停在 frame）。"""
+        try:
+            return await page.locator(QR_FRAME_SELECTOR).count() > 0
+        except PlaywrightError as error:
+            logger.debug("检测登录页失败：%s", error)
+            return False
 
     def _authenticated_page(self) -> Page | None:
         """返回当前已登录管理后台的标签页，优先使用扫码时那个页面。"""
@@ -495,6 +512,17 @@ async def _wait_for_network_idle(page: Page) -> None:
 
 def _has_header(headers: dict[str, str], name: str) -> bool:
     return any(key.lower() == name.lower() for key in headers)
+
+
+def _looks_like_html(body: str) -> bool:
+    """接口本应返回 JSON，返回网页基本意味着请求没落到真接口上。"""
+    return body.lstrip().startswith("<")
+
+
+def _looks_like_login_page(body: str) -> bool:
+    """按特征判断响应体是不是企业微信登录页。"""
+    lowered = body.lower()
+    return any(marker in lowered for marker in _LOGIN_PAGE_MARKERS)
 
 
 def select_authenticated_page(login_page: Page | None, pages: list[Page]) -> Page | None:
