@@ -144,16 +144,28 @@ class SyncService:
             return SyncAppResult(agent_id=app.agent_id, name=app.name, success=False, message=message)
 
         synced_at = _utc_now().isoformat()
+        # 有读取模板时写入后再读一次，防止"接口说成功、实际没写进去"
+        verified_ips: list[str] | None = None
+        if read_template is not None:
+            verified_ips, _ = await self._read_current_trusted_ips(app, read_template, ip)
+            if verified_ips is not None and verified_ips != [ip]:
+                return self._record_read_back_mismatch(app, verified_ips, ip)
+
         self._storage.update_app_sync_result(
             app.agent_id, synced_ip=ip, synced_at=synced_at, error=None
         )
-        # 写入成功后后台的可信 IP 就是这个值，直接记为已知状态，省掉一次读取
-        self._storage.record_app_trusted_ips(app.agent_id, ips=[ip], checked_at=synced_at)
+        if verified_ips is None:
+            # 没有读取模板或回读失败时，只能按写入结果记录已知状态
+            self._storage.record_app_trusted_ips(app.agent_id, ips=[ip], checked_at=synced_at)
+        verification_note = _describe_verification(read_template is not None, verified_ips)
         return SyncAppResult(
             agent_id=app.agent_id,
             name=app.name,
             success=True,
-            message=f"已覆盖为 {ip}{_describe_previous_ips(current_ips, read_error)}",
+            message=(
+                f"已覆盖为 {ip}{verification_note}"
+                f"{_describe_previous_ips(current_ips, read_error)}"
+            ),
             updated=True,
         )
 
@@ -177,6 +189,26 @@ class SyncService:
             app.agent_id, ips=trusted_ips, checked_at=_utc_now().isoformat()
         )
         return trusted_ips, None
+
+    def _record_read_back_mismatch(
+        self, app: WeComApp, verified_ips: list[str], ip: str
+    ) -> SyncAppResult:
+        """写入返回成功、回读却发现没变：按失败记录，并写明当前真实值。"""
+        message = (
+            f"写入已提交，但回读校验不通过：当前可信 IP 为 "
+            f"{'、'.join(verified_ips) or '空'}，目标为 {ip}"
+        )
+        self._storage.update_app_sync_result(
+            app.agent_id, synced_ip=None, synced_at=None, error=message
+        )
+        logger.warning("应用 %s 回读校验失败：%s", app.agent_id, message)
+        return SyncAppResult(
+            agent_id=app.agent_id,
+            name=app.name,
+            success=False,
+            message=message,
+            updated=True,
+        )
 
     def _summarize(
         self, started_at: datetime, *, public_ip: str, results: list[SyncAppResult]
@@ -259,4 +291,11 @@ def _describe_previous_ips(current_ips: list[str] | None, read_error: str | None
     if read_error is not None:
         return f"（未能读到原值：{read_error[:120]}）"
     return ""
+
+
+def _describe_verification(has_read_template: bool, verified_ips: list[str] | None) -> str:
+    """写入后的回读结论；没配读取模板时不做说明，避免让人误以为校验过。"""
+    if not has_read_template:
+        return ""
+    return "（已回读确认）" if verified_ips is not None else "（回读校验未完成）"
 

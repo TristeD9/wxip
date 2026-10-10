@@ -36,6 +36,7 @@ class FakeWeComSession:
         failure_message: str = "企业微信返回 HTTP 500",
         trusted_ips_by_agent: dict[str, list[str]] | None = None,
         read_error_message: str | None = None,
+        read_sequence: list[list[str] | None] | None = None,
     ) -> None:
         self.calls: list[tuple[str, str, str]] = []
         self.reads: list[str] = []
@@ -44,6 +45,7 @@ class FakeWeComSession:
         self.failure_message = failure_message
         self.trusted_ips_by_agent = trusted_ips_by_agent or {}
         self.read_error_message = read_error_message
+        self.read_sequence = list(read_sequence) if read_sequence else None
 
     async def ensure_logged_in(self) -> None:
         if not self.logged_in:
@@ -55,6 +57,8 @@ class FakeWeComSession:
         self.calls.append((agent_id, app_id, ip))
         if agent_id in self.failing_agent_ids:
             raise WeComAdminError(self.failure_message)
+        # 模拟后台真的写进去了：之后读取会看到新值
+        self.trusted_ips_by_agent[agent_id] = [ip]
         return '{"errcode":0}'
 
     async def read_trusted_ips(
@@ -63,6 +67,8 @@ class FakeWeComSession:
         self.reads.append(agent_id)
         if self.read_error_message is not None:
             raise WeComAdminError(self.read_error_message)
+        if self.read_sequence:
+            return self.read_sequence.pop(0)
         return self.trusted_ips_by_agent.get(agent_id)
 
 
@@ -385,4 +391,61 @@ async def test_sync_writes_when_current_trusted_ip_list_is_unrecognized(storage)
     assert summary.status == "ok"
     assert "响应里没有可识别的可信 IP 列表" in summary.results[0].message
     assert wecom_service.calls == [("1230002", "", "9.9.9.9")]
+
+
+async def test_sync_confirms_write_by_reading_back(storage):
+    """写入后回读一次，值已经变过来才算成功。"""
+    prepare_storage(storage)
+    prepare_read_template(storage)
+    wecom_service = FakeWeComSession(read_sequence=[["1.1.1.1"], ["9.9.9.9"]])
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_service
+    )
+
+    summary = await service.sync()
+
+    assert summary.status == "ok"
+    assert summary.results[0].success is True
+    assert "已回读确认" in summary.results[0].message
+    assert wecom_service.reads == ["1230002", "1230002"]
+    stored_app = storage.list_wecom_apps()[0]
+    assert stored_app.last_synced_ip == "9.9.9.9"
+    assert stored_app.current_trusted_ips == ["9.9.9.9"]
+
+
+async def test_sync_fails_when_read_back_still_shows_old_ip(storage):
+    """接口说写入成功、回读发现没变时必须报失败，不能假成功。"""
+    prepare_storage(storage)
+    prepare_read_template(storage)
+    wecom_service = FakeWeComSession(read_sequence=[["1.1.1.1"], ["1.1.1.1"]])
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_service
+    )
+
+    summary = await service.sync()
+
+    assert summary.status == "failed"
+    assert summary.results[0].success is False
+    assert summary.results[0].updated is True
+    assert "回读校验不通过" in summary.results[0].message
+    stored_app = storage.list_wecom_apps()[0]
+    assert stored_app.last_synced_ip is None
+    assert "回读校验不通过" in stored_app.last_error
+    assert stored_app.current_trusted_ips == ["1.1.1.1"]
+
+
+async def test_sync_notes_when_read_back_is_unavailable(storage):
+    """回读读不出来时仍按写入结果算成功，但要在说明里注明未完成校验。"""
+    prepare_storage(storage)
+    prepare_read_template(storage)
+    wecom_service = FakeWeComSession(read_sequence=[["1.1.1.1"], None])
+    service = SyncService(
+        storage=storage, resolver=FakeResolver(ip="9.9.9.9"), wecom_session=wecom_service
+    )
+
+    summary = await service.sync()
+
+    assert summary.status == "ok"
+    assert "回读校验未完成" in summary.results[0].message
+    assert storage.list_wecom_apps()[0].last_synced_ip == "9.9.9.9"
 
