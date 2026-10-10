@@ -50,7 +50,7 @@
 | --- | --- |
 | 机器 | Linux x86_64（VPS / 群晖等 NAS 均可）；Windows/macOS 装 Docker Desktop 也行 |
 | Docker | 20.10+ 且带 Compose v2（`docker compose version` 有输出） |
-| 磁盘 | 3 GB 可用足够（镜像已只带 Chromium，比旧版小很多；以下载体积为准） |
+| 磁盘 | 2 GB 可用足够（镜像解压后约 1.25 GB） |
 | 内存 | 至少 1.5 GB 可用（容器内要跑 Chromium） |
 | 网络 | ① 能访问 iKuai 管理地址 ② 能访问 `work.weixin.qq.com` ③ 能拉 Docker Hub |
 | 账号 | 企业微信管理员（能扫码进后台、能改可信 IP）+ iKuai Web 账号密码 |
@@ -144,7 +144,7 @@ docker pull docker.m.daocloud.io/YOUR_DOCKERHUB/wxip:latest
 docker tag  docker.m.daocloud.io/YOUR_DOCKERHUB/wxip:latest YOUR_DOCKERHUB/wxip:latest
 
 # C. 完全离线
-docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 体积以下载/导出结果为准
+docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 约 0.4 GB
 # 目标机器：gunzip -c wxip-image.tar.gz | docker load
 ```
 
@@ -356,8 +356,8 @@ curl 'https://work.weixin.qq.com/wework_admin/apps/saveIpConfig?lang=zh_CN' \
 - **公网 IP 来源**：iKuai 解析失败会回退外部回显服务，只有后端与 iKuai 同出口时两者才一致；
 - **无头浏览器风控**：若企业微信对无头浏览器弹安全验证，把 `APP_BROWSER_HEADLESS` 设为 `false`
   并在有图形界面的环境运行；
-- **镜像体积**：已从 Playwright 官方镜像（解压 3.73 GB）换成 `python:3.12-slim` + 仅 Chromium，
-  体积明显变小，具体数值以构建结果为准；
+- **镜像体积**：`python:3.12-slim` + 仅 Chromium，解压后约 1.25 GB（旧版用 Playwright 官方镜像，
+  解压 3.73 GB、下载约 1.0 GB，现在下载约为旧版的三分之一）；
 - **面板账号与企业微信登录互不影响**：改面板密码不影响扫码，反之亦然。
 
 ## 八、安全说明

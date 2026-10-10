@@ -23,7 +23,7 @@
 | --- | --- |
 | 系统 | Linux x86_64（Windows/macOS 装 Docker Desktop 也可以） |
 | Docker | 20.10 以上，且带 **Docker Compose v2**（`docker compose version` 有输出） |
-| 磁盘 | 3 GB 可用足够（镜像已只带 Chromium，比旧版小很多） |
+| 磁盘 | 2 GB 可用足够（镜像解压后约 1.25 GB） |
 | 内存 | 至少 1.5 GB 可用（容器内要跑 Chromium） |
 
 ### 2.2 网络（三条硬性要求，缺一不可）
@@ -176,7 +176,7 @@ docker compose up -d
 ```bash
 # 有网的机器
 docker pull YOUR_DOCKERHUB/wxip:latest
-docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 体积以导出结果为准
+docker save YOUR_DOCKERHUB/wxip:latest | gzip > wxip-image.tar.gz   # 约 0.4 GB
 
 # 拷到目标机器后
 gunzip -c wxip-image.tar.gz | docker load
@@ -328,7 +328,7 @@ tar -czf wxip-data-$(date +%F).tar.gz -C /opt/wecom-trusted-ip data
 | 镜像地址 | 你自己构建并推送的地址，例如 `docker.io/YOUR_DOCKERHUB/wxip:latest` |
 | Digest | `sha256:69715235ecd565b9f3c95141daa81481573b9a79e1cd304d144646cb3a540674` |
 | 压缩体积 | 约 1028 MB |
-| 体积 | 已换成 `python:3.12-slim` + 仅 Chromium，比旧版（解压 3.73 GB）小很多，具体以构建结果为准 |
+| 体积 | `python:3.12-slim` + 仅 Chromium，解压约 1.25 GB（旧版 3.73 GB），下载约为旧版的三分之一 |
 | 基础镜像 | `mcr.microsoft.com/playwright/python:v1.63.0-noble`（自带 Chromium 153） |
 | 架构 | linux/amd64 |
 
