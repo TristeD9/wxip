@@ -19,7 +19,6 @@ from app.config import Settings
 from app.passwords import check_password_strength, hash_password
 from app.storage import AppStorage
 from app.wecom.admin_browser import WeComAdminError, WeComAdminSession
-from app.wecom.parsing import extract_trusted_ips
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     reset_admin.add_argument("--username", default=None, help="只删除指定用户；省略时全部删除")
 
     subparsers.add_parser(
-        "check-trusted-ips", help="只读读取各应用当前可信 IP，逐条打印原始返回与解析结果"
+        "check-trusted-ips", help="只读读取各应用当前可信 IP，逐条打印结果用于排查"
     )
     return parser
 
@@ -103,24 +102,19 @@ def _reset_admin(storage: AppStorage, username: str | None) -> int:
 
 
 def _check_trusted_ips(settings: Settings, storage: AppStorage) -> int:
-    """只读复现一次"读取当前可信 IP"，把每一步细节打到终端，便于排查读取失败。"""
+    """只读复现一次"读取当前可信 IP"，把结果打到终端，便于排查读取失败。"""
     return asyncio.run(_check_trusted_ips_async(settings, storage))
 
 
 async def _check_trusted_ips_async(settings: Settings, storage: AppStorage) -> int:
-    template = storage.get_read_template()
     apps = storage.list_wecom_apps()
-    print(f"读取模板：{'已配置' if template else '未配置'}")
-    if template is not None:
-        print(f"  {template.method} {template.url}")
-        print(f"  请求体：{template.body or '-'}")
-    print(f"应用数量：{len(apps)}")
-    if template is None or not apps:
-        print("缺少读取模板或应用清单，请先到面板「企业微信」页补齐。")
+    print(f"应用清单：{len(apps)} 个")
+    print(f"写入模板：{'已配置' if storage.get_request_template() else '未配置'}")
+    print(f"备用读取模板：{'已配置' if storage.get_read_template() else '未配置（不影响读取）'}")
+    if not apps:
+        print("没有应用清单，请先到面板「企业微信」页自动发现或手工导入。")
         return 1
 
-    observation = storage.latest_public_ip()
-    public_ip = observation.ip if observation else ""
     session = WeComAdminSession(
         state_path=settings.wecom_state_path,
         headless=settings.browser_headless,
@@ -128,27 +122,24 @@ async def _check_trusted_ips_async(settings: Settings, storage: AppStorage) -> i
         timeout_ms=settings.browser_timeout_ms,
         apps_url_provider=storage.get_wecom_apps_url,
     )
-    failed = 0
     try:
-        for app in apps:
-            print(f"\n[{app.agent_id}] {app.name}｜控制台编号：{app.console_app_id or '未填'}")
-            try:
-                raw = await session.replay_request(
-                    template, agent_id=app.agent_id, app_id=app.console_app_id or "", ip=public_ip
-                )
-            except WeComAdminError as error:
-                print(f"  请求失败：{error}")
-                failed += 1
-                continue
-            parsed = extract_trusted_ips(raw)
-            print(f"  原始返回：{raw[:400]}")
-            print(f"  解析结果：{parsed}")
-            if parsed is None:
-                failed += 1
+        trusted_ips_by_agent = await session.read_app_trusted_ips()
+    except WeComAdminError as error:
+        print(f"读取失败：{error}")
+        return 1
     finally:
         await session.close()
-    print(f"\n完成：{len(apps) - failed}/{len(apps)} 个应用读取成功（请求失败或解析不出都算失败）。")
-    return 0 if failed == 0 else 1
+
+    missing = 0
+    for app in apps:
+        if app.agent_id not in trusted_ips_by_agent:
+            missing += 1
+            print(f"[{app.agent_id}] {app.name}：未读到（控制台编号 {app.console_app_id or '未填'}）")
+            continue
+        trusted_ips = trusted_ips_by_agent[app.agent_id]
+        print(f"[{app.agent_id}] {app.name}：当前可信 IP = {'、'.join(trusted_ips) or '（空）'}")
+    print(f"\n完成：{len(apps) - missing}/{len(apps)} 个应用读到当前可信 IP。")
+    return 0 if missing == 0 else 1
 
 
 if __name__ == "__main__":

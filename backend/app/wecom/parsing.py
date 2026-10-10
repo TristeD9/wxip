@@ -202,6 +202,46 @@ def merge_app_states(existing: list[WeComApp], discovered: list[WeComApp]) -> li
     return merged
 
 
+def extract_app_trusted_ips(payload: object) -> dict[str, list[str]]:
+    """从应用列表响应里取出每个应用当前的可信 IP。
+
+    管理后台的应用列表接口一次返回所有自建应用的配置，可信 IP 就在各自条目里。
+    字段名会随版本变化，所以先用"其它应用条目里确实装着 IP 的字段名"当依据，再按同一
+    字段名读其余应用——这样"没有这个字段"会被当成读不出来，而不是"没有可信 IP"。
+
+    Args:
+        payload: 应用列表接口返回的 JSON 数据。
+
+    Returns:
+        ``{agent_id: [ip, ...]}``；一个字段名都没认出来时返回空字典，表示读不出来。
+    """
+    entries = [
+        entry
+        for entry in _iter_dicts(payload)
+        if _looks_like_self_built_app(entry) and _read_agent_id(entry) is not None
+    ]
+    ip_field_names = {
+        field_name
+        for entry in entries
+        for field_name, value in entry.items()
+        if _normalize_ip_values(value)
+    }
+    if not ip_field_names:
+        return {}
+    trusted_ips_by_agent: dict[str, list[str]] = {}
+    for entry in entries:
+        agent_id = _read_agent_id(entry)
+        if agent_id is None:
+            continue
+        collected = [
+            ip
+            for field_name in ip_field_names
+            for ip in (_normalize_ip_values(entry.get(field_name)) or [])
+        ]
+        trusted_ips_by_agent[agent_id] = list(dict.fromkeys(collected))
+    return trusted_ips_by_agent
+
+
 def parse_manual_app_list(text: str) -> list[WeComApp]:
     """解析手工粘贴的应用清单。
 

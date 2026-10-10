@@ -5,6 +5,7 @@ import pytest
 from app.models import WeComApp
 from app.wecom.parsing import (
     describe_wecom_error,
+    extract_app_trusted_ips,
     extract_self_built_apps,
     extract_trusted_ips,
     merge_app_states,
@@ -268,6 +269,57 @@ def test_extract_trusted_ips_returns_empty_for_empty_known_field():
     )
 
     assert extract_trusted_ips(body) == []
+
+
+def test_extract_app_trusted_ips_maps_entries_by_agent_id():
+    payload = {
+        "data": {
+            "openapi_app": [
+                {"agentid": 1230002, "name": "客服系统", "ip_list": ["203.0.113.10"]},
+                {"agentid": 1230003, "name": "报表系统", "ip_list": []},
+            ]
+        }
+    }
+
+    assert extract_app_trusted_ips(payload) == {"1230002": ["203.0.113.10"], "1230003": []}
+
+
+def test_extract_app_trusted_ips_learns_field_name_from_sibling_app():
+    """字段名不重要：只要有一个应用条目里确实装着 IP，就按同一字段名读其余应用。"""
+    payload = {
+        "data": {
+            "openapi_app": [
+                {"agentid": 1230002, "trusted_ip_whitelist": ["203.0.113.10"]},
+                {"agentid": 1230003, "trusted_ip_whitelist": ["203.0.113.11", "203.0.113.12"]},
+            ]
+        }
+    }
+
+    assert extract_app_trusted_ips(payload) == {
+        "1230002": ["203.0.113.10"],
+        "1230003": ["203.0.113.11", "203.0.113.12"],
+    }
+
+
+def test_extract_app_trusted_ips_ignores_system_apps():
+    payload = {
+        "data": {
+            "corp_app_list": [
+                {"app_id": "5629500000000003", "app_open_id": "2000002", "ip_list": ["1.1.1.1"]}
+            ]
+        }
+    }
+
+    assert extract_app_trusted_ips(payload) == {}
+
+
+def test_extract_app_trusted_ips_returns_empty_when_no_entry_holds_ips():
+    """所有条目都没有 IP 时返回空字典，表示读不出来，而不是"没有可信 IP"。"""
+    payload = {
+        "data": {"openapi_app": [{"agentid": 1230002, "name": "客服系统", "ip_list": []}]}
+    }
+
+    assert extract_app_trusted_ips(payload) == {}
 
 
 def test_extract_trusted_ips_falls_back_to_plain_ip_array():

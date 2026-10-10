@@ -22,14 +22,6 @@ export async function renderDashboardPage(ctx) {
   if (!state.template_configured) {
     nodes.push(notice("尚未录制可信 IP 请求模板，自动同步不会执行。", "warn"));
   }
-  if (!state.read_template_configured) {
-    nodes.push(
-      notice(
-        "尚未录制「读取可信 IP 模板」，应用列表无法显示企业微信里的当前可信 IP（显示为未知）。",
-        "info",
-      ),
-    );
-  }
   if (apps.length === 0) {
     nodes.push(notice("尚未获取自建应用清单，请在「企业微信」页面自动发现或手工导入。", "info"));
   }
@@ -291,4 +283,3 @@ function recentEventsPanel(events) {
     ),
   });
 }
-

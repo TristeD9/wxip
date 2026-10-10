@@ -17,7 +17,12 @@ from playwright.async_api import async_playwright
 
 from app.models import RequestTemplate, WeComApp, WeComLoginState
 from app.wecom.curl_template import filter_replay_headers
-from app.wecom.parsing import describe_wecom_error, extract_self_built_apps, extract_trusted_ips
+from app.wecom.parsing import (
+    describe_wecom_error,
+    extract_app_trusted_ips,
+    extract_self_built_apps,
+    extract_trusted_ips,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,43 +111,65 @@ class WeComAdminSession:
             raise WeComAdminError("上一次自动发现还在进行中，请稍候再试")
         async with self._operation_lock:
             await self._ensure_logged_in_locked()
-            context = self._require_context()
-            page = self._authenticated_page()
-            created_page = page is None
-            if page is None:
-                page = await context.new_page()
-            recorder = _ResponseRecorder()
-            context.on("response", recorder.handle_response)
-            try:
-                for candidate_url in self._candidate_apps_urls():
-                    if page.url == candidate_url:
-                        # 已经在目标地址时 goto 不会产生网络请求，必须强制刷新
-                        await page.reload(wait_until="domcontentloaded", timeout=self._timeout_ms)
-                    else:
-                        await page.goto(
-                            candidate_url, wait_until="domcontentloaded", timeout=self._timeout_ms
-                        )
-                    await _wait_for_network_idle(page)
-                    await recorder.drain()
-                    apps = recorder.extract_apps()
-                    if apps:
-                        # 成功也留一份记录，便于核对抓到的到底是哪些应用
-                        await self._dump_discovery_debug(page, recorder)
-                        return apps
-                if not self._is_admin_frame(page.url):
-                    raise WeComAdminError("企业微信管理后台登录态已失效，请重新扫码登录后再试")
-                # 必须在页面还开着的时候留档，否则拿不到标题和正文
-                await self._dump_discovery_debug(page, recorder)
-            finally:
-                context.remove_listener("response", recorder.handle_response)
-                await recorder.drain()
-                if created_page:
-                    await page.close()
+            for payload in await self._capture_app_list_payloads():
+                apps = extract_self_built_apps(payload)
+                if apps:
+                    return apps
 
             raise WeComAdminError(
-                f"未能在应用管理页捕获到自建应用列表（已记录 {len(recorder.records)} 个响应，"
-                "详情见 data/wecom_discover_debug.json），或在页面中手工粘贴应用清单"
+                "未能在应用管理页捕获到自建应用列表（详情见 data/wecom_discover_debug.json），"
+                "或在页面中手工粘贴应用清单"
             )
+
+    async def read_app_trusted_ips(self) -> dict[str, list[str]]:
+        """从应用管理页的列表响应里读出每个应用当前的可信 IP。
+
+        后台的应用列表接口一次返回所有自建应用的配置，比逐个应用单独读取更省请求。
+
+        Returns:
+            ``{agent_id: [ip, ...]}``；读不出来时返回空字典，调用方必须把它当成
+            "读不到"，而不是"当前没有可信 IP"。
+        """
+        async with self._operation_lock:
+            await self._ensure_logged_in_locked()
+            for payload in await self._capture_app_list_payloads():
+                trusted_ips = extract_app_trusted_ips(payload)
+                if trusted_ips:
+                    return trusted_ips
+            return {}
+
+    async def _capture_app_list_payloads(self) -> list[object]:
+        """打开应用管理页，返回后台应用列表响应的 JSON 载荷（调用方需已持有操作锁）。"""
+        context = self._require_context()
+        page = self._authenticated_page()
+        created_page = page is None
+        if page is None:
+            page = await context.new_page()
+        recorder = _ResponseRecorder()
+        context.on("response", recorder.handle_response)
+        try:
+            for candidate_url in self._candidate_apps_urls():
+                if page.url == candidate_url:
+                    # 已经在目标地址时 goto 不会产生网络请求，必须强制刷新
+                    await page.reload(wait_until="domcontentloaded", timeout=self._timeout_ms)
+                else:
+                    await page.goto(
+                        candidate_url, wait_until="domcontentloaded", timeout=self._timeout_ms
+                    )
+                await _wait_for_network_idle(page)
+                await recorder.drain()
+                if recorder.payloads():
+                    break
+            if not self._is_admin_frame(page.url):
+                raise WeComAdminError("企业微信管理后台登录态已失效，请重新扫码登录后再试")
+            # 成功也留一份记录，便于核对抓到的到底是哪些应用与响应结构
+            await self._dump_discovery_debug(page, recorder)
+            return recorder.payloads()
+        finally:
+            context.remove_listener("response", recorder.handle_response)
+            await recorder.drain()
+            if created_page:
+                await page.close()
 
     def _candidate_apps_urls(self) -> list[str]:
         configured = self._apps_url_provider()
@@ -417,15 +444,11 @@ class _ResponseRecorder:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
 
-    def extract_apps(self) -> list[WeComApp]:
-        for record in self.records:
-            payload = record.get("payload")
-            if payload is None:
-                continue
-            apps = extract_self_built_apps(payload)
-            if apps:
-                return apps
-        return []
+    def payloads(self) -> list[object]:
+        """返回已经解析成 JSON 的响应载荷（只含带应用编号的那些响应）。"""
+        return [
+            record["payload"] for record in self.records if record.get("payload") is not None
+        ]
 
     async def _capture(self, response: Response) -> None:
         try:

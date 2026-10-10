@@ -29,10 +29,10 @@ export async function renderWeComPage(ctx) {
       ctx,
     }),
     templatePanel({
-      title: "读取可信 IP 模板",
+      title: "备用读取模板（可选）",
       subtitle:
-        "在后台打开某个自建应用的「企业可信IP」，对该页面加载可信 IP 的请求 Copy as cURL 后粘贴解析；" +
-        "同步时用它读取企业微信里的当前可信 IP，与 iKuai 公网 IP 比对后只覆盖不一致的应用。",
+        "当前可信 IP 默认从企业微信「应用管理页」的列表响应里读取，不需要配置任何模板；" +
+        "只有默认读取失败时，才需要在这里录一个查询可信 IP 的请求作为兜底。",
       curlPlaceholder:
         "打开任意自建应用的「企业可信IP」，在开发者工具里对返回可信 IP 的请求选择 Copy as cURL，粘贴到这里",
       parseUrl: "/api/wecom/read-template/parse",
